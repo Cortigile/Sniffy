@@ -1,0 +1,93 @@
+#ifndef FIRMWAREMANAGER_H
+#define FIRMWAREMANAGER_H
+
+#include <QObject>
+#include <QThread>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QColor>
+#include <QFile>
+#include <QCoreApplication>
+#include <QStandardPaths>
+#include <QDateTime>
+
+#include "flasher/stlinkflasher.h"
+#include "authenticator.h"
+#include "firmwarecompatibility.h"
+
+class FirmwareManager : public QObject
+{
+    Q_OBJECT
+public:
+    explicit FirmwareManager(Authenticator *auth, QObject *parent = nullptr);
+    ~FirmwareManager();
+
+    enum StatusMessageType {
+        MsgInfo = 0,
+        MsgError,
+        MsgSuccess,
+        MsgLoginRequired
+    };
+    Q_ENUM(StatusMessageType)
+
+    void startUpdateProcess();
+    void startMassErase();
+    bool isFlashInProgress() const;
+
+signals:
+    void progressChanged(int value, int total);
+    void statusMessage(const QString &msg, const QColor &color, int msgType = MsgInfo);
+    void logMessage(const QString &msg);
+    void operationStarted();
+    void operationFinished(bool success);
+    void firmwareFlashed();
+
+private slots:
+    // Flasher slots
+    void onDeviceConnected(const QString &info);
+    void onFlashProgress(int value, int total);
+    void onFlashLog(const QString &msg);
+    void onFlashFinished(bool success, const QString &msg);
+    void onOperationStarted(const QString &operation);
+    void onDeviceUIDAvailable(const QString &uidHex, const QString &mcu);
+    void onDeviceUIDError(const QString &message);
+
+    // Auth slots
+    void onAuthStarted();
+    void onAuthFinished();
+    void onAuthFailed(const QString &code, const QString &uiMessage);
+    void onAuthSucceeded(const QDateTime &validity, const QByteArray &token);
+
+    // Network slots
+    void onFirmwareDownloadFinished(QNetworkReply *reply);
+
+private:
+    void failOperation(const QString &msg, int msgType = MsgError);
+    QString cachedFirmwarePath(const QString &uidHex) const;
+    QString cachedFirmwareMetadataPath(const QString &uidHex) const;
+    bool loadCachedFirmwareManifest(const QString &uidHex, FirmwareCompatibility::ReleaseManifest *manifest) const;
+    bool saveCachedFirmwareManifest(const QString &uidHex, const FirmwareCompatibility::ReleaseManifest &manifest) const;
+    bool isManifestCompatible(const FirmwareCompatibility::ReleaseManifest &manifest, QString *message) const;
+    bool validateFirmwareReplyHeaders(QNetworkReply *reply, const QString &expectedMcu, QString *message) const;
+    void requestLatestFirmwareManifest(const QString &uidHex, const QString &mcu);
+    void requestFirmwareBinary(const QString &uidHex, const QString &mcu);
+
+    StLinkFlasher *m_flasher;
+    QThread *m_flasherThread;
+    Authenticator *m_auth;
+    QNetworkAccessManager *m_networkManager;
+
+    bool m_flashInProgress;
+    QString m_lastReadUidHex;
+    QString m_lastReadMcu;
+    FirmwareCompatibility::ReleaseManifest m_pendingManifest;
+
+    enum OperationType {
+        OpNone,
+        OpFlash,
+        OpErase
+    };
+    OperationType m_currentOperation = OpNone;
+};
+
+#endif // FIRMWAREMANAGER_H

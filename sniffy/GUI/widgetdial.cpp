@@ -1,0 +1,196 @@
+/*
+Class for widget with dial and controls
+- Options has to be added by addOption()
+- Each option must have shownValue(QString), unit(QString), realValue(float)
+- option selection is done by Plus / Mius buttons, ComboBox or from Dial
+*/
+#include "widgetdial.h"
+#include "ui_widgetdial.h"
+#include "stylehelper.h"
+// #include <QGridLayout>
+
+
+WidgetDial::WidgetDial(QWidget *parent, QString name, int optionalEmitParam) :  
+    QWidget(parent),
+    ui(new Ui::WidgetDial),
+    optionalEmitParam(optionalEmitParam)
+{
+    ui->setupUi(this);
+    const auto &p = Graphics::palette();
+    setStyleSheet(p.styleDial);
+    ui->comboBox->setStyleSheet(p.styleComboBox);
+
+    if (Graphics::palette().isEmberTheme)
+    {
+        // hide the position indicator but keep thick arcs for this theme
+        ui->dial->setHideIndicator(true);
+    }    
+
+    ui->label_name->setText(name);
+    ui->dial->setPageStep(1);
+    ui->dial->setCustomGraphics(Graphics::palette().styleCustomDialsUsed);
+    setObjectName(name);
+
+    connect(ui->pushButton_plus,SIGNAL(clicked()),this,SLOT(plusClicked()));
+    connect(ui->pushButton_minus,SIGNAL(clicked()),this,SLOT(minusClicked()));
+    connect(ui->dial,SIGNAL(valueChanged(int)),this,SLOT(valChanged(int)));
+    
+    // Set callback for double-click using direct function call instead of Qt signal/slot
+    ui->dial->setDoubleClickCallback([this]() {
+        resetToDefault();
+    });
+    
+    connect(ui->comboBox,SIGNAL(currentIndexChanged(int)),ui->dial, SLOT(setValue(int)));
+    // options container default constructed (value semantics)
+    setColor(Graphics::palette().controls);
+}
+
+WidgetDial::~WidgetDial()
+{
+    delete ui;
+}
+
+QByteArray WidgetDial::saveGeometry()
+{
+    return QByteArray::number(selectedIndex);
+}
+
+void WidgetDial::restoreGeometry(QByteArray geom)
+{
+    disconnect(ui->dial,SIGNAL(valueChanged(int)),this,SLOT(valChanged(int)));
+    setSelectedIndex(geom.toInt(),true);
+    connect(ui->dial,SIGNAL(valueChanged(int)),this,SLOT(valChanged(int)));
+}
+
+void WidgetDial::addOption (QString shownValue, QString unit,float realValue){
+
+    params_dial par;
+    par.shownValue = shownValue;
+    par.unit = unit;
+    par.realValue = realValue;
+    options.append(par);
+
+    ui->comboBox->addItem(shownValue + " " +unit);
+
+    ui->dial->setMaximum(options.length()-1);
+
+    if(options.length()==1){
+        setSelectedIndex(0);
+    }
+}
+
+void WidgetDial::clearOptions()
+{
+    ui->comboBox->clear();
+    options.clear();
+}
+
+int WidgetDial::getSelectedIndex() const
+{
+    return selectedIndex;
+}
+
+qreal WidgetDial::getRealValue() const
+{
+    if(selectedIndex >=0 && selectedIndex < options.size())
+        return options.at(selectedIndex).realValue;
+    return 0.0;
+}
+
+void WidgetDial::setSelectedIndex(int index, bool silent){
+    if(index < 0 || index >= options.size()) return;
+    ui->dial->setValue(index);
+    ui->comboBox->setCurrentIndex(index);
+
+    ui->label_unit->setText(options.at(index).unit);
+    ui->label_value->setText(options.at(index).shownValue);
+    selectedIndex = index;
+    if(!silent){
+        emit valueChanged(options.at(selectedIndex).realValue,optionalEmitParam);
+    }
+}
+
+
+void WidgetDial::setColor(QString color){
+    dialColor = color;
+    ui->widget_dial->setStyleSheet(StyleHelper::dialWithTextColor(Graphics::palette().styleDial, color));
+    ui->pushButton_plus->setStyleSheet(StyleHelper::pushButton(color));
+    ui->pushButton_minus->setStyleSheet(StyleHelper::pushButton(color));
+
+    if (Graphics::palette().isEmberTheme) {
+        if (!isEnabled()) {
+            ui->pushButton_plus->setGraphicsEffect(nullptr);
+            ui->pushButton_minus->setGraphicsEffect(nullptr);
+            ui->label_name->setStyleSheet(QStringLiteral("QLabel{color:%1;}").arg(Graphics::palette().windowControlHover));
+        } else {
+            StyleHelper::applyGlowEffect(ui->pushButton_plus, color, StyleHelper::GLOW_BLUR_RADIUS_DIAL);
+            StyleHelper::applyGlowEffect(ui->pushButton_minus, color, StyleHelper::GLOW_BLUR_RADIUS_DIAL);
+            ui->label_name->setStyleSheet(QStringLiteral("QLabel{color:%1;}").arg(color));
+        }
+    }
+}
+
+int WidgetDial::getDefaultIndex() const
+{
+    return defaultIndex;
+}
+
+void WidgetDial::setDefaultIndex(int index)
+{
+    defaultIndex = index;
+    // Tell the underlying CustomDial what its default value is
+    ui->dial->setDefaultValue(index);
+    setSelectedIndex(index);
+}
+
+void WidgetDial::plusClicked(){
+    selectedIndex++;
+    if(selectedIndex>=options.length()){
+        selectedIndex = options.length()-1;
+    }
+    ui->comboBox->setCurrentIndex(selectedIndex);
+}
+
+void WidgetDial::minusClicked(){
+    selectedIndex--;
+    if(selectedIndex<0){
+        selectedIndex = 0;
+    }
+    ui->comboBox->setCurrentIndex(selectedIndex);
+}
+
+void WidgetDial::valChanged(int in){
+    if(in>=0 && in<options.length()){
+        setSelectedIndex(in);
+    }
+}
+
+void WidgetDial::resetToDefault()
+{
+    setSelectedIndex(defaultIndex);
+}
+
+void WidgetDial::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::EnabledChange && Graphics::palette().isEmberTheme) {
+        if (!isEnabled()) {
+            ui->pushButton_plus->setGraphicsEffect(nullptr);
+            ui->pushButton_minus->setGraphicsEffect(nullptr);
+            ui->label_name->setStyleSheet(QStringLiteral("QLabel{color:%1;}").arg(Graphics::palette().windowControlHover));
+        } else {
+            if (!dialColor.isEmpty()) {
+                StyleHelper::applyGlowEffect(ui->pushButton_plus, dialColor, StyleHelper::GLOW_BLUR_RADIUS_DIAL);
+                StyleHelper::applyGlowEffect(ui->pushButton_minus, dialColor, StyleHelper::GLOW_BLUR_RADIUS_DIAL);
+                ui->label_name->setStyleSheet(QStringLiteral("QLabel{color:%1;}").arg(dialColor));
+            }
+        }
+    }
+}
+
+
+
+
+
+
+

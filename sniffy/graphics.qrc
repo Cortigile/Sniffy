@@ -1,0 +1,121 @@
+<RCC>
+    <qresource prefix="/graphics">
+        <!-- Common icons shared across all themes -->
+        <file>graphics/common/logo_gray_full.png</file>        
+        <file>graphics/common/cnt_ab_ff.png</file>
+        <file>graphics/common/cnt_ab_fr.png</file>
+        <file>graphics/common/cnt_ab_rf.png</file>
+        <file>graphics/common/cnt_ab_rr.png</file>
+        <file>graphics/common/cnt_ba_ff.png</file>
+        <file>graphics/common/cnt_ba_fr.png</file>
+        <file>graphics/common/cnt_ba_rf.png</file>
+        <file>graphics/common/cnt_ba_rr.png</file>
+        <file>graphics/common/exit.png</file>
+        <file>graphics/common/icon_chart.png</file>
+        <file>graphics/common/icon_clear_history.png</file>
+        <file>graphics/common/icon_connected.png</file>
+        <file>graphics/common/icon_counter.png</file>
+        <file>graphics/common/icon_history_off.png</file>
+        <file>graphics/common/icon_history_on.png</file>
+        <file>graphics/common/icon_list.png</file>
+        <file>graphics/common/icon_media_pause.png</file>
+        <file>graphics/common/icon_media_play.png</file>
+        <file>graphics/common/icon_not_connected.png</file>
+        <file>graphics/common/icon_pattern_generator.png</file>
+        <file>graphics/common/icon_pwm_gen.png</file>
+        <file>graphics/common/icon_pwm_gen_old.png</file>
+        <file>graphics/common/icon_save.png</file>
+        <file>graphics/common/icon_scope.png</file>
+        <file>graphics/common/icon_scope_old.png</file>
+        <file>graphics/common/icon_signal_generator.png</file>
+        <file>graphics/common/icon_syncpwm.png</file>
+        <file>graphics/common/icon_unknown.png</file>
+        <file>graphics/common/icon_voltage_source.png</file>
+        <file>graphics/common/icon_voltmeter.png</file>
+        <file>graphics/common/icon_voltmeter_oold.png</file>
+        <file>graphics/common/menu_burger_button.png</file>
+        <file>graphics/common/menu_burger_button_backw.png</file>
+        <file>graphics/common/no_device.png</file>
+        <file>graphics/common/separator.png</file>
+        <file>graphics/common/settings_gear.png</file>
+        <file>graphics/common/settings_gear_hover.png</file>
+        <file>graphics/common/settings_horizontal.png</file>
+        <file>graphics/common/settings_vertical.png</file>
+        <file>graphics/common/sign_pm.png</file>
+        <file>graphics/common/status_locked.png</file>
+        <file>graphics/common/status_pause.png</file>
+        <file>graphics/common/status_play.png</file>
+        <file>graphics/common/status_play_hidden.png</file>        
+        <file>graphics/common/status_stop.png</file>
+        <file>graphics/common/status_pause_hidden.png</file>
+        <file>graphics/common/units_avg.png</file>
+        <file>graphics/common/units_err.png</file>
+        <file>graphics/common/units_erravg.png</file>
+        <file>graphics/common/units_hz.png</file>
+        <file>graphics/common/units_perc.png</file>
+        <file>graphics/common/units_sec.png</file>
+        <file>graphics/common/units_v.png</file>
+        <file>graphics/common/units_Vmax.png</file>
+        <file>graphics/common/units_Vmin.png</file>
+        <file>graphics/common/units_Vripple.png</file>
+        <file>graphics/common/unknown_device.png</file>
+        <file>graphics/common/signalBackground.png</file>
+        <file>graphics/common/arrow_down.png</file>
+        <file>graphics/common/arrow_up.png</file>
+        <file>graphics/common/dock.png</file>
+        <file>graphics/common/unDock.png</file>
+        <file>graphics/common/nucleo_64.png</file>
+        <file>graphics/common/nucleo_144.png</file>
+
+        <!-- Per-theme: dark -->
+        <file>graphics/themes/dark/user.png</file>
+        <file>graphics/themes/dark/user_error.png</file>
+        <file>graphics/themes/dark/user_ok.png</file>
+
+        <!-- Per-theme: light -->
+        <file>graphics/themes/light/user.png</file>
+        <file>graphics/themes/light/user_error.png</file>
+        <file>graphics/themes/light/user_ok.png</file>
+
+        <!-- Per-theme: dawn -->
+        <file>graphics/themes/dawn/user.png</file>
+        <file>graphics/themes/dawn/user_error.png</file>
+        <file>graphics/themes/dawn/user_ok.png</file>
+
+        <!-- Per-theme: greenfield -->
+        <file>graphics/themes/greenfield/user.png</file>
+        <file>graphics/themes/greenfield/user_error.png</file>
+        <file>graphics/themes/greenfield/user_ok.png</file>
+
+        <!-- Per-theme: msdos -->
+        <file>graphics/themes/msdos/user.png</file>
+        <file>graphics/themes/msdos/user_error.png</file>
+        <file>graphics/themes/msdos/user_ok.png</file>
+
+        <!-- Per-theme: ember -->
+        <file>graphics/themes/ember/user.png</file>
+        <file>graphics/themes/ember/user_error.png</file>
+        <file>graphics/themes/ember/user_ok.png</file>        
+
+        <!-- Shared app icon -->
+        <file>graphics/logo_color.png</file>
+    </qresource>
+    <qresource prefix="/">
+        <file>default_layout.json</file>
+        <!-- Pinout vector rendering: layout templates and per-board pin configs -->
+        <file>config/nucleo64_template.json</file>
+        <file>config/nucleo144_template.json</file>
+        <file>config/Nucleo-F303RE.json</file>
+        <file>config/Nucleo-F446RE.json</file>
+        <file>config/Nucleo-G474RE.json</file>
+        <file>config/Nucleo-L476RG.json</file>
+        <file>config/Nucleo-C562RE.json</file>
+        <file>config/Nucleo-U575ZI.json</file>
+    </qresource>
+    <qresource prefix="/licenses">
+        <file>THIRD-PARTY-NOTICES.md</file>
+        <file>third-party-licenses/libusb-LGPL-2.1.txt</file>
+        <file>third-party-licenses/stlink-BSD-3-Clause.txt</file>
+        <file>third-party-licenses/tinyexpr-zlib.txt</file>
+    </qresource>
+</RCC>

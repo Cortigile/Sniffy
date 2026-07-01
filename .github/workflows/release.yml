@@ -1,0 +1,447 @@
+name: Release Installer
+
+on:
+  push:
+    tags:
+      - 'desktop-v*' # Trigger on tags like desktop-v1.0.0, desktop-v2.3.4
+
+permissions:
+  contents: write
+
+env:
+  MANUAL_ASSET_ROOT: sniffy
+
+jobs:
+  release_plan:
+    name: Plan desktop and MCP publish
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      mcp_version: ${{ steps.versions.outputs.mcp_version }}
+      mcp_tag: ${{ steps.versions.outputs.mcp_tag }}
+      desktop_version: ${{ steps.versions.outputs.desktop_version }}
+      desktop_tag: ${{ steps.versions.outputs.desktop_tag }}
+      last_tag: ${{ steps.diff.outputs.last_tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Fetch MCP tags
+        shell: bash
+        run: git fetch --tags --force
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Read release versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+          import re
+
+          versions = {}
+          current_section = None
+          for raw_line in Path("tools/release/versions.toml").read_text(encoding="utf-8").splitlines():
+              line = raw_line.split("#", 1)[0].strip()
+              if not line:
+                  continue
+
+              section_match = re.fullmatch(r"\[([A-Za-z0-9_-]+)\]", line)
+              if section_match is not None:
+                  current_section = section_match.group(1)
+                  continue
+
+              version_match = re.fullmatch(r'version\s*=\s*"([^"]+)"', line)
+              if version_match is not None and current_section is not None:
+                  versions[current_section] = version_match.group(1)
+
+          desktop = versions["desktop"]
+          mcp = versions["mcp"]
+          print(f"desktop_version={desktop}")
+          print(f"desktop_tag=desktop-v{desktop}")
+          print(f"mcp_version={mcp}")
+          print(f"mcp_tag=mcp-v{mcp}")
+          PY
+
+      - name: Validate desktop release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" != "${{ steps.versions.outputs.desktop_tag }}" ]; then
+            echo "Triggered desktop tag ${GITHUB_REF_NAME} does not match tools/release/versions.toml (${{ steps.versions.outputs.desktop_tag }})"
+            exit 1
+          fi
+
+      - name: Validate MCP release metadata
+        shell: bash
+        working-directory: sniffy/tools/sniffy_mcp
+        run: python release_metadata.py validate --expected-tag "${{ steps.versions.outputs.mcp_tag }}"
+
+      - name: Detect MCP changes since last MCP release
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          LAST_TAG=$(git tag --list 'mcp-v*' --sort=-creatordate | head -n 1 || true)
+          if [ -z "$LAST_TAG" ]; then
+            CHANGED=true
+          elif git diff --quiet "$LAST_TAG"..HEAD -- sniffy/tools/sniffy_mcp; then
+            CHANGED=false
+          else
+            CHANGED=true
+          fi
+
+          if [ "$CHANGED" = true ] && git rev-parse -q --verify "refs/tags/${{ steps.versions.outputs.mcp_tag }}" >/dev/null; then
+            echo "MCP changed since $LAST_TAG but tag ${{ steps.versions.outputs.mcp_tag }} already exists. Bump tools/release/versions.toml before cutting the app release."
+            exit 1
+          fi
+
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: release_plan
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            qt_arch: win64_mingw
+          - os: ubuntu-latest
+            qt_arch: linux_gcc_64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.8.0'
+          host: ${{ runner.os == 'Windows' && 'windows' || 'linux' }}
+          target: 'desktop'
+          arch: ${{ matrix.qt_arch }}
+          modules: 'qtcharts qtserialport'
+          tools: ${{ runner.os == 'Windows' && 'tools_mingw1310' || '' }}
+          
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libgl1-mesa-dev libusb-1.0-0-dev libstlink-dev ninja-build libcups2-dev libvulkan-dev
+
+      - name: Setup Ninja (Windows)
+        if: runner.os == 'Windows'
+        uses: ashutoshvarma/setup-ninja@master
+
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        run: choco install nsis
+
+      # Explicitly find and set the Qt MinGW compiler on Windows
+      # to avoid picking up the broken system path C:/mingw64/bin/gcc.exe
+      - name: Setup MinGW (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # Only look inside the ../Qt directory which is where install-qt-action installs release
+          $qtRoot = Resolve-Path "../Qt"
+          
+          # Find the Qt toolchain directory (e.g. mingw_1310_64)
+          $mwDirs = Get-ChildItem -Path "$qtRoot/Tools" -Directory -Filter "mingw*_64" -ErrorAction SilentlyContinue
+          
+          if ($mwDirs) {
+              # Pick the newest version numerically (e.g. 1120 over 730)
+              $picked = $mwDirs | ForEach-Object {
+                  $m = [regex]::Match($_.Name, 'mingw(\d+)_64')
+                  if ($m.Success) {
+                      [pscustomobject]@{ Dir = $_; VersionNum = [int]$m.Groups[1].Value }
+                  }
+              } | Sort-Object VersionNum -Descending | Select-Object -First 1
+              
+              if ($picked) {
+                  $targetDir = $picked.Dir
+                  $binDir = Join-Path $targetDir.FullName "bin"
+                  $gcc = Join-Path $binDir "gcc.exe"
+                  $gpp = Join-Path $binDir "g++.exe"
+                  
+                  if ((Test-Path $gcc) -and (Test-Path $gpp)) {
+                      echo "Found MinGW toolchain at: $($targetDir.FullName)"
+                      
+                      # Set CMake variables for compiler
+                      echo "CC=$gcc" >> $env:GITHUB_ENV
+                      echo "CXX=$gpp" >> $env:GITHUB_ENV
+                      
+                      # Add to PATH so runtime DLLs are found
+                      echo "$binDir" >> $env:GITHUB_PATH
+                  } else {
+                      echo "Error: gcc/g++ not found in $($binDir)"
+                      exit 1
+                  }
+              } else {
+                  echo "Error: Could not parse version from MinGW directories"
+                  $mwDirs | Format-List
+                  exit 1
+              }
+          } else {
+              echo "Error: No MinGW toolchain directory found in $qtRoot/Tools" 
+              Get-ChildItem -Path "$qtRoot/Tools" -Recurse
+              exit 1
+          }
+
+      - name: Configure CMake
+        run: cmake -S sniffy -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Create Installer (CPack)
+        run: |
+          cd build
+          cpack -C Release -V
+        shell: bash
+
+      - name: Derive desktop release version
+        shell: bash
+        run: echo "SNIFFY_DESKTOP_VERSION=${{ needs.release_plan.outputs.desktop_version }}" >> "$GITHUB_ENV"
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Sniffy Desktop ${{ env.SNIFFY_DESKTOP_VERSION }}
+          files: |
+            build/Sniffy-*.exe
+            build/*.msi
+            build/*.deb
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  manual_pdf:
+    name: Build ${{ matrix.manual.language }} release manual PDF
+    runs-on: ubuntu-latest
+    needs: release_plan
+    strategy:
+      fail-fast: false
+      matrix:
+        manual:
+          - language: cs
+            source: sniffy/docs/USER_MANUAL_cs.md
+            release_file_prefix: sniffy-user-manual-cs
+          - language: en
+            source: sniffy/docs/USER_MANUAL_en.md
+            release_file_prefix: sniffy-user-manual-en
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PDF runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            fonts-dejavu-core \
+            libcairo2 \
+            libgdk-pixbuf-2.0-0 \
+            libharfbuzz-subset0 \
+            libpango-1.0-0 \
+            libpangoft2-1.0-0 \
+            shared-mime-info
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tools/manuals/requirements.txt
+
+      - name: Build versioned manual PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p manual_artifacts
+          python tools/manuals/build_manual.py \
+            --input "${{ matrix.manual.source }}" \
+            --output "manual_artifacts/${{ matrix.manual.release_file_prefix }}-desktop-v${{ needs.release_plan.outputs.desktop_version }}.pdf" \
+            --asset-root "$MANUAL_ASSET_ROOT"
+
+      - name: Upload manual artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniffy-release-manual-${{ matrix.manual.language }}
+          path: manual_artifacts/*.pdf
+
+  manual_release:
+    name: Attach manual to desktop release
+    runs-on: ubuntu-latest
+    needs:
+      - release_plan
+      - build
+      - manual_pdf
+
+    steps:
+      - name: Download manual artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sniffy-release-manual-*
+          path: manual_artifacts
+          merge-multiple: true
+
+      - name: Upload manual asset to desktop release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: manual_artifacts/*.pdf
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload manual PDFs to external server (FTP)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_DOCS_USER }}
+          password: ${{ secrets.FTP_DOCS_PWD }}
+          local-dir: ./manual_artifacts/
+          server-dir: ./manuals/
+          delete: false
+
+  mcp_package:
+    name: Build MCP package
+    runs-on: ubuntu-latest
+    needs: release_plan
+    if: needs.release_plan.outputs.changed == 'true'
+    defaults:
+      run:
+        working-directory: sniffy/tools/sniffy_mcp
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare MCP package version
+        run: python release_metadata.py write-version --version "${{ needs.release_plan.outputs.mcp_version }}"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Validate MCP release metadata
+        run: python release_metadata.py validate --expected-tag "${{ needs.release_plan.outputs.mcp_tag }}"
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Check package metadata
+        run: python -m twine check dist/*
+
+      - name: Verify built wheel installs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .release-venv
+          source .release-venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python - <<'PY'
+          import sniffy_mcp
+
+          print(sniffy_mcp.__version__)
+          PY
+
+      - name: Upload MCP package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniffy-mcp-dist
+          path: sniffy/tools/sniffy_mcp/dist/*
+
+  mcp_publish:
+    name: Publish MCP with app release
+    runs-on: ubuntu-latest
+    needs:
+      - release_plan
+      - mcp_package
+      - build
+    if: needs.release_plan.outputs.changed == 'true'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Download MCP package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sniffy-mcp-dist
+          path: mcp_dist
+
+      - name: Ensure MCP release exists
+        uses: actions/github-script@v7
+        env:
+          MCP_TAG: ${{ needs.release_plan.outputs.mcp_tag }}
+          MCP_VERSION: ${{ needs.release_plan.outputs.mcp_version }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const tag = process.env.MCP_TAG;
+            const name = `Sniffy MCP ${process.env.MCP_VERSION}`;
+
+            try {
+              await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name,
+                body: '',
+              });
+            }
+
+      - name: Upload MCP assets to standalone MCP release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release_plan.outputs.mcp_tag }}
+          name: Sniffy MCP ${{ needs.release_plan.outputs.mcp_version }}
+          body: ''
+          files: |
+            mcp_dist/*.whl
+            mcp_dist/*.tar.gz
+          overwrite_files: true

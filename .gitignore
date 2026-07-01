@@ -1,0 +1,18 @@
+# user files
+*.user
+
+# C build files
+moc_*.*
+ui_*.*
+*.o
+
+# executables
+*.exe
+
+# build folder
+build*
+!tools/manuals/build_manual.py
+.venv/
+
+# vscode folders
+**/.vscode/

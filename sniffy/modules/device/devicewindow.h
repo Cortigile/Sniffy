@@ -1,0 +1,66 @@
+#ifndef WINDOWSCAN_H
+#define WINDOWSCAN_H
+
+#include <QScrollArea>
+#include <QVBoxLayout>
+#include <QFileInfo>
+#include <QSet>
+
+#include "../../GUI/widgetselection.h"
+#include "../../GUI/widgetbuttons.h"
+#include "../../GUI/widgetlabel.h"
+#include "../../GUI/widgetseparator.h"
+#include "../../GUI/widgetdesciptionexpand.h"
+
+#include "devicespec.h"
+#include "pinoutwidget.h"
+#include "../pinfunctioninfo.h"
+
+namespace Ui {
+class DeviceWindow;
+}
+
+class DeviceWindow : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit DeviceWindow(QWidget *parent = nullptr);
+    ~DeviceWindow();
+
+    void showSpecification(DeviceSpec *spec);
+    void hideSpecification();
+
+    void addModuleDescription(QString name, QList<QString> labels, QList<QString> values);
+    void registerModulePinFunctions(const QString &moduleName, const QList<PinFunctionInfo> &pins);
+    void setModuleActivePinFunctions(const QString &moduleName, const QList<PinFunctionInfo> &pins);
+    void clearModuleDescriptions();
+
+    WidgetSelection *deviceSelection;
+    WidgetButtons *deviceConnectButton;
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
+private:
+    QWidget *WidgetSpecification;
+    QVBoxLayout *verticalLayoutSpecification;
+    QSpacerItem *verticalSpacer;
+    QScrollArea *scrollAreaSpecification;
+
+    QVBoxLayout *descriptorsLayout;
+    QList<WidgetDesciptionExpand*> *modulesDescriptions;
+    WidgetDesciptionExpand *devDesc;
+
+    Ui::DeviceWindow *ui;
+
+    PinoutWidget *pinoutWidget = nullptr;  // vector pinout renderer (replaces static PNG)
+    QStringList pinFunctionModuleOrder;
+    QHash<QString, QList<PinFunctionInfo>> activePinFunctionsByDisplayName;
+    QString currentDeviceBaseImage; // e.g. "Nucleo-F303RE"
+    bool showingPinout = false;
+
+    bool m_pins_empty() const;
+    void rebuildPinoutFunctions();
+    bool togglePinoutDisplay();
+};
+
+#endif // WINDOWSCAN_H

@@ -1,0 +1,62 @@
+#ifndef SCAN_H
+#define SCAN_H
+
+#include <QObject>
+
+#include "devicewindow.h"
+#include "devicespec.h"
+#include "../pinfunctioninfo.h"
+
+#include "../../GUI/widgetcontrolmodule.h"
+#include "../../GUI/moduledockwidget.h"
+#include "../abstractmodule.h"
+#include "../errorlist.h"
+
+class Device : public AbstractModule
+{
+    Q_OBJECT
+public:
+    explicit Device(QObject *parent = nullptr);
+
+    QWidget* getWidget();
+    QString getName();
+    QString getMcuId();
+    DeviceSpec *getDeviceSpec() const;
+
+    void updateGUIDeviceList(QList<DeviceDescriptor> deviceList, bool autoConnectSingle = false);
+
+    void errorHandler(QByteArray error);
+
+    // Clear all module descriptions from the right panel (specification area)
+    void clearAllModuleDescriptions();
+
+private:
+    void passSystemSpecificationToGUI();
+
+    DeviceSpec *deviceSpec;
+    DeviceWindow *deviceWindow;
+
+signals:
+    void ScanDevices();
+    void openDevice(int deviceIndex);
+    void closeDevice();
+    void deviceSpecificationReady();
+
+public slots:
+    void connectDevice(int index);
+    void disconnectDevice();
+    void addModuleDescription(QString name, QList<QString> labels, QList<QString> values);
+    void registerModulePinFunctions(const QString &moduleName, const QList<PinFunctionInfo> &pins);
+    void setModuleActivePinFunctions(const QString &moduleName, const QList<PinFunctionInfo> &pins);
+    void parseData(QByteArray);
+    void writeConfiguration();
+    void parseConfiguration(QByteArray config);
+    QByteArray getConfiguration();
+    void startModule();
+    void stopModule();
+
+private slots:
+    void deviceConnection(int buttonIndex);
+};
+
+#endif // SCAN_H

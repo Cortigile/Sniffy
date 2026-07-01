@@ -1,0 +1,45 @@
+#include "patterngeneratorconfig.h"
+#include <QDataStream>
+#include <QIODevice>
+
+PatternGeneratorConfig::PatternGeneratorConfig(QObject *parent)
+{
+    Q_UNUSED(parent);
+
+    for (int i = 0; i < PATTERNS_NUM; i++)
+    {
+        freq[i] = PATT_DEFAULT_GEN_FREQ;
+        dataLen[i] = PATT_DEFAULT_DATA_LENGTH;
+    }
+}
+
+void PatternGeneratorConfig::parse(QByteArray config)
+{
+    QDataStream stream(config);
+
+    stream >> pattIndex;
+
+    for (int i = 0; i < PATTERNS_NUM; i++)
+    {
+        stream >> freq[i];
+        stream >> dataLen[i];
+    }
+
+    isConfigurationLoaded = true;
+}
+
+QByteArray PatternGeneratorConfig::serialize()
+{
+    QByteArray data; // stack allocation avoids leak
+    QDataStream stream(&data, QIODevice::WriteOnly);
+
+    stream << pattIndex;
+
+    for (int i = 0; i < PATTERNS_NUM; i++)
+    {
+        stream << freq[i];
+        stream << dataLen[i];
+    }
+
+    return data; // return by value (NRVO / move)
+}

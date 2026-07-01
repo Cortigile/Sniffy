@@ -1,0 +1,194 @@
+name: Publish User Manual
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'sniffy/docs/USER_MANUAL_cs.md'
+      - 'sniffy/docs/USER_MANUAL_en.md'
+      - 'sniffy/docs/assets/**'
+      - 'tools/manuals/**'
+      - '.github/workflows/publish-manual.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MANUAL_ASSET_ROOT: sniffy
+  FTP_SERVER: ${{ secrets.FTP_SERVER }}
+  FTP_DOCS_USER: ${{ secrets.FTP_DOCS_USER }}
+  FTP_DOCS_PWD: ${{ secrets.FTP_DOCS_PWD }}
+
+jobs:
+  detect_manual_changes:
+    name: Detect manual changes
+    runs-on: ubuntu-latest
+    outputs:
+      manuals: ${{ steps.changes.outputs.manuals }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Detect changed manuals
+        id: changes
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            : > changed_files.txt
+          elif [ -z "${BEFORE_SHA}" ] || [[ "${BEFORE_SHA}" =~ ^0+$ ]]; then
+            git diff-tree --no-commit-id --name-only -r "${AFTER_SHA}" > changed_files.txt
+          else
+            git diff --name-only "${BEFORE_SHA}" "${AFTER_SHA}" > changed_files.txt
+          fi
+
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from __future__ import annotations
+
+          import json
+          import os
+          from pathlib import Path
+
+          manuals = [
+              {
+                  "language": "cs",
+                  "source": "sniffy/docs/USER_MANUAL_cs.md",
+                  "public_file": "sniffy-user-manual-cs.pdf",
+                  "preserve_file": "sniffy-user-manual-en.pdf",
+                  "artifact": "sniffy-user-manual-cs",
+              },
+              {
+                  "language": "en",
+                  "source": "sniffy/docs/USER_MANUAL_en.md",
+                  "public_file": "sniffy-user-manual-en.pdf",
+                  "preserve_file": "sniffy-user-manual-cs.pdf",
+                  "artifact": "sniffy-user-manual-en",
+              },
+          ]
+
+          if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
+              selected = manuals
+          else:
+              changed_files = Path("changed_files.txt").read_text(encoding="utf-8").splitlines()
+              common_changed = any(
+                  path.startswith("sniffy/docs/assets/") or path.startswith("tools/manuals/")
+                  or path == ".github/workflows/publish-manual.yml"
+                  for path in changed_files
+              )
+              selected = [
+                  manual
+                  for manual in manuals
+                  if common_changed or manual["source"] in changed_files
+              ]
+
+          print("manuals=" + json.dumps(selected, separators=(",", ":")))
+          PY
+
+  build_manual:
+    name: Build ${{ matrix.manual.language }} manual PDF
+    runs-on: ubuntu-latest
+    needs: detect_manual_changes
+    if: needs.detect_manual_changes.outputs.manuals != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        manual: ${{ fromJson(needs.detect_manual_changes.outputs.manuals) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install PDF runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            fonts-dejavu-core \
+            libcairo2 \
+            libgdk-pixbuf-2.0-0 \
+            libharfbuzz-subset0 \
+            libpango-1.0-0 \
+            libpangoft2-1.0-0 \
+            shared-mime-info
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tools/manuals/requirements.txt
+
+      - name: Build manual PDF
+        run: |
+          mkdir -p build/manuals
+          python tools/manuals/build_manual.py \
+            --input "${{ matrix.manual.source }}" \
+            --output "build/manuals/${{ matrix.manual.public_file }}" \
+            --asset-root "$MANUAL_ASSET_ROOT"
+
+      - name: Upload manual artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.manual.artifact }}
+          path: build/manuals/${{ matrix.manual.public_file }}
+          retention-days: 14
+
+  deploy_manual:
+    name: Deploy ${{ matrix.manual.language }} manual to FTP
+    needs:
+      - detect_manual_changes
+      - build_manual
+    if: needs.detect_manual_changes.outputs.manuals != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        manual: ${{ fromJson(needs.detect_manual_changes.outputs.manuals) }}
+
+    steps:
+      - name: Check FTP deploy secrets
+        id: deploy_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${FTP_SERVER}" ] && [ -n "${FTP_DOCS_USER}" ] && [ -n "${FTP_DOCS_PWD}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping FTP deploy because FTP_SERVER, FTP_DOCS_USER or FTP_DOCS_PWD is not configured."
+          fi
+
+      - name: Download manual artifact
+        if: ${{ steps.deploy_gate.outputs.enabled == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.manual.artifact }}
+          path: docs_artifacts
+
+      - name: Upload Manual to External Server (FTP)
+        if: ${{ steps.deploy_gate.outputs.enabled == 'true' }}
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ env.FTP_SERVER }}
+          username: ${{ env.FTP_DOCS_USER }}
+          password: ${{ env.FTP_DOCS_PWD }}
+          local-dir: ./docs_artifacts/
+          server-dir: ./manuals/
+          state-name: .ftp-deploy-sync-state-${{ matrix.manual.language }}.json
+          exclude: |
+            ${{ matrix.manual.preserve_file }}

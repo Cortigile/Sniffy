@@ -1,0 +1,29 @@
+/*
+Separator for the widgets with grey label and grey line
+*/
+#include "widgetseparator.h"
+#include "ui_widgetseparator.h"
+#include "stylehelper.h"
+
+WidgetSeparator::WidgetSeparator(QWidget *parent, QString name) :
+    QWidget(parent),
+    ui(new Ui::WidgetSeparator)
+{
+    ui->setupUi(this);
+    ui->widget->setStyleSheet(StyleHelper::backgroundImage(Graphics::tintedPath(Graphics::getCommonPath()+"separator.png", QColor(Graphics::palette().chartGridlegLowContrast))));
+    ui->label_name->setStyleSheet(StyleHelper::separatorLabel(Graphics::palette().chartGridlegDefault));
+    ui->label_name->setText(name);           
+}
+
+void WidgetSeparator::hideLine(){
+    ui->widget->hide();
+}
+
+void WidgetSeparator::setText(QString text){
+    ui->label_name->setText(text);
+}
+
+WidgetSeparator::~WidgetSeparator()
+{
+    delete ui;
+}

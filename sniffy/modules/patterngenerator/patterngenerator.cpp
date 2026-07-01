@@ -1,0 +1,179 @@
+#include "patterngenerator.h"
+
+PatternGenerator::PatternGenerator(QObject *parent)
+{
+    Q_UNUSED(parent);
+
+    config = new PatternGeneratorConfig();
+    pattGenWindow = new PatternGeneratorWindow(config);
+    pattGenWindow->setObjectName("patternGenWindow");
+
+    moduleCommandPrefix = cmd->PATTERN_GENERATOR;
+    moduleName = "Pattern generator";
+    moduleIconURI = Graphics::getCommonPath() + "icon_pattern_generator.png";
+
+    connect(pattGenWindow, &PatternGeneratorWindow::runGenerator, this, &PatternGenerator::startGeneratorCallback);
+    connect(pattGenWindow, &PatternGeneratorWindow::stopGenerator, this, &PatternGenerator::stopGeneratorCallback);
+    // Track OD configuration state to avoid redundant writes
+    connect(pattGenWindow, &PatternGeneratorWindow::i2cSelected, this, [this]() {
+        if (comm && !i2cPinsOdEnabled) {
+            comm->write(moduleCommandPrefix, Commands::CMD_GEN_PATT_I2C_PINS_OD_ENABLE);
+            i2cPinsOdEnabled = true;
+        }
+    });
+    connect(pattGenWindow, &PatternGeneratorWindow::i2cDeselected, this, [this]() {
+        if (comm && i2cPinsOdEnabled) {
+            comm->write(moduleCommandPrefix, Commands::CMD_GEN_PATT_I2C_PINS_OD_DISABLE);
+            i2cPinsOdEnabled = false;
+        }
+    });
+}
+
+QWidget *PatternGenerator::getWidget()
+{
+    return pattGenWindow;
+}
+
+void PatternGenerator::parseData(QByteArray data)
+{
+    QByteArray dataHeader = data.left(4);
+    QByteArray dataToPass = data.remove(0, 4);
+
+    if (dataHeader == cmd->CONFIG)
+    {
+        moduleSpecification = new PatternGeneratorSpec(this);
+        moduleSpecification->parseSpecification(dataToPass);
+        pattGenWindow->setSpecification(static_cast<PatternGeneratorSpec *>(moduleSpecification));
+        showModuleControl();
+        buildModuleDescription(static_cast<PatternGeneratorSpec *>(moduleSpecification));
+
+        genComms = new GenCommons(moduleCommandPrefix, comm, static_cast<PatternGeneratorSpec *>(moduleSpecification)->maxSamplingRate, this);
+    }
+    else if (dataHeader == cmd->CMD_GEN_NEXT)
+    {
+        dataTransferNext();
+    }
+    else if (dataHeader == cmd->CMD_GEN_OK)
+    {
+        dataTransferFinished();
+    }
+    else
+    {
+        qDebug() << "[PATTERN GEN] Unhandled incomming data!" << data;
+    }
+}
+
+void PatternGenerator::buildModuleDescription(PatternGeneratorSpec *spec)
+{
+    QString name = moduleName;
+    QList<QString> labels, values;
+
+    labels.append("Number of Channels");
+    values.append(QString::number(PATT_MAX_CHANNELS_NUM));
+
+    labels.append("Max sampling rate");
+    values.append(LabelFormator::formatOutout(spec->maxSamplingRate, "sps", 2));
+
+    labels.append("Pins");
+    QString pins;
+    for (int i = 0; i < PATT_MAX_CHANNELS_NUM; i++)
+    {
+        pins += spec->chanPins[i] + ", ";
+    }
+    values.append(pins.left(pins.length() - 2));
+    showModuleDescription(name, labels, values);
+
+    // Pinout overlay
+    QList<PinFunctionInfo> pinFuncs;
+    for(int i = 0; i < PATT_MAX_CHANNELS_NUM; i++){
+        if(!spec->chanPins[i].isEmpty() && spec->chanPins[i] != "-"){
+            pinFuncs.append({spec->chanPins[i], "CH" + QString::number(i + 1), "pattern_generator"});
+        }
+    }
+    showModulePinFunctions(name, pinFuncs);
+}
+
+void PatternGenerator::writeConfiguration()
+{
+    pattGenWindow->restoreGUIAfterStartup();
+}
+
+void PatternGenerator::parseConfiguration(QByteArray config)
+{
+    this->config->parse(config);
+}
+
+QByteArray PatternGenerator::getConfiguration()
+{
+    return config->serialize();
+}
+
+void PatternGenerator::startModule()
+{
+    comm->write(moduleCommandPrefix, cmd->CMD_GEN_MODE, cmd->CMD_MODE_PATTERN);
+    setModuleStatus(ModuleStatus::PAUSE);
+}
+
+void PatternGenerator::stopModule()
+{
+    stopGenerator();
+    genComms->generatorDeinit();
+    config->state = PatternGeneratorConfig::State::STOPPED;
+    pattGenWindow->setGenerateButton("Start", Graphics::palette().controls);
+}
+
+void PatternGenerator::startGenerator()
+{
+    setModuleStatus(ModuleStatus::PLAY);
+    genComms->startGenerator();
+}
+
+void PatternGenerator::stopGenerator()
+{
+    setModuleStatus(ModuleStatus::PAUSE);
+    genComms->stopGenerator();
+}
+
+void PatternGenerator::dataTransferNext()
+{
+    if (!dataBeingUploaded)
+        return;
+
+    genComms->sendNext();
+    if (genComms->isSentAll())
+    {
+        genComms->genAskForFreq();
+        startGenerator();
+    }
+
+    pattGenWindow->setProgress(genComms->getProgress());
+}
+
+void PatternGenerator::dataTransferFinished()
+{
+    if (dataBeingUploaded)
+    {
+        dataBeingUploaded = false;
+        pattGenWindow->setGeneratorState(false);
+    }
+}
+
+void PatternGenerator::startPatternUpload()
+{
+    dataBeingUploaded = true;
+    genComms->setSignalToSend(pattGenWindow->getPatternData());
+    genComms->setSamplingFrequency(0, config->freq[config->pattIndex] * genComms->getSignaLength(0));
+    genComms->sendNext();
+}
+
+void PatternGenerator::startGeneratorCallback()
+{
+    startPatternUpload();
+}
+
+void PatternGenerator::stopGeneratorCallback()
+{
+    stopGenerator();
+    dataBeingUploaded = false;
+}
+
