@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'desktop-v*' # Trigger on tags like desktop-v1.0.0, desktop-v2.3.4
-
+  workflow_dispatch:    
 permissions:
   contents: write
 
