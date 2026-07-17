@@ -2,7 +2,7 @@
 
 > This manual is based on the available code, UI, and documentation in the Sniffy repositories as of May 24, 2026.
 >
-> Scope: covers the Sniffy desktop application, device connection, login, firmware, session, measurement and generation modules, and optional advanced automation via Agent Bridge and sniffy-mcp.
+> Scope: covers the Sniffy / LEO Sniffy desktop application, device connection, login, firmware, session, measurement and generation modules, and optional advanced automation via Agent Bridge and sniffy-mcp.
 
 ![I am Sniffy the Squirrel, and I will be your companion](assets/images/low_poly_squirrel.png){.manual-scale--90}
 
@@ -110,8 +110,28 @@ This does not automatically mean that every one of these boards will have the sa
 ### Linux
 
 1. Install the application's distribution package.
-2. Verify access to ST-Link without sudo.
-3. Connect the board and launch Sniffy.
+2. Ensure your user has access to USB debug devices (recommended one-time setup):
+
+  ```bash
+  sudo usermod -aG plugdev $USER
+  ```
+
+  Then log out and log in again.
+
+3. Verify access to ST-Link without sudo.
+
+  ```bash
+  st-info --probe
+  ```
+
+  If `st-info` is missing, install it:
+
+  ```bash
+  sudo apt install stlink-tools
+  ```
+
+  If the board still does not appear, unplug and reconnect it after login.
+4. Connect the board and launch Sniffy.
 
 ### What happens after the application starts
 
