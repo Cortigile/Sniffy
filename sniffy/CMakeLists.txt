@@ -194,27 +194,24 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
-    
-    # Try to find stlink library
-    find_library(STLINK_LIB NAMES stlink stlink-static)
-    if(NOT STLINK_LIB)
-        message(WARNING "libstlink not found. Please install libstlink-dev.")
+    if(DEFINED ENV{SNIFFY_STLINK_LIBRARY})
+        set(STLINK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/stlink/include")
+        set(STLINK_LIB "$ENV{SNIFFY_STLINK_LIBRARY}")
+        if(NOT EXISTS "${STLINK_LIB}")
+            message(FATAL_ERROR "Pinned ST-Link library not found: ${STLINK_LIB}")
+        endif()
     else()
-        message(STATUS "Found libstlink: ${STLINK_LIB}")
+        find_library(STLINK_LIB NAMES stlink stlink-static REQUIRED)
+        find_path(STLINK_INCLUDE_DIR stlink.h PATH_SUFFIXES stlink REQUIRED)
     endif()
 
-    # Find stlink headers (typically in /usr/include/stlink/)
-    find_path(STLINK_INCLUDE_DIR stlink.h
-        PATH_SUFFIXES stlink
+    message(STATUS "Found libstlink: ${STLINK_LIB}")
+    message(STATUS "Found stlink headers: ${STLINK_INCLUDE_DIR}")
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${LIBUSB_INCLUDE_DIRS}
+        ${STLINK_INCLUDE_DIR}
     )
-    if(STLINK_INCLUDE_DIR)
-        message(STATUS "Found stlink headers: ${STLINK_INCLUDE_DIR}")
-    else()
-        message(WARNING "stlink.h not found. Please install libstlink-dev.")
-    endif()
-
-    target_include_directories(${PROJECT_NAME} PRIVATE ${LIBUSB_INCLUDE_DIRS} ${STLINK_INCLUDE_DIR})
-    set(EXTRA_LIBS ${LIBUSB_LIBRARIES} ${STLINK_LIB})
+    set(EXTRA_LIBS ${STLINK_LIB} ${LIBUSB_LIBRARIES})
 endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -317,6 +314,31 @@ install(TARGETS ${PROJECT_NAME}
     BUNDLE DESTINATION bin
 )
 
+if(UNIX AND NOT APPLE)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sniffy.desktop.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/sniffy.desktop"
+        @ONLY
+    )
+
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/sniffy.desktop"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+    )
+
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/graphics/logo_color.png"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/512x512/apps"
+        RENAME sniffy.png
+    )
+
+    # Install chip definitions in a standard Linux data location.
+    install(DIRECTORY
+        "${CMAKE_CURRENT_SOURCE_DIR}/libs/stlink/config/chips"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/sniffy"
+    )
+endif()
+
 # 2. Install ST-Link & LibUSB DLLs and Configs
 if(WIN32)
     # Install the required DLLs next to the executable
@@ -382,7 +404,7 @@ if(WIN32)
 
     # Add Desktop Shortcut (NSIS only)
     set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "
-        CreateShortCut \\\"$DESKTOP\\\\Sniffy.lnk\\\" \\\"$INSTDIR\\\\bin\\\\${PROJECT_NAME}.exe\\\" \\\"\\\" \\\"$INSTDIR\\\\bin\\\\${PROJECT_NAME}.exe\\\" 0
+        CreateShortCut \\\"$DESKTOP\\\\Sniffy.lnk\\\" \\\"$INSTDIR\\\\bin\\\\${PROJECT_NAME}.exe\\\"
     ")
     set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS "
         Delete \\\"$DESKTOP\\\\Sniffy.lnk\\\"

@@ -2,7 +2,7 @@
 
 > Tento manuál vychází z dostupného kódu, UI a dokumentace v repozitářích Sniffy k 24. 5. 2026.
 >
-> Rozsah: pokrývá desktopovou aplikaci Sniffy, připojení zařízení, přihlášení, firmware, session, měřicí a generační moduly a volitelnou pokročilou automatizaci přes Agent Bridge a sniffy-mcp.
+> Rozsah: pokrývá desktopovou aplikaci Sniffy / LEO Sniffy, připojení zařízení, přihlášení, firmware, session, měřicí a generační moduly a volitelnou pokročilou automatizaci přes Agent Bridge a sniffy-mcp.
 
 ![I am Sniffy the Squirrel, and I will be your companion](assets/images/low_poly_squirrel.png){.manual-scale--90}
 
@@ -110,8 +110,28 @@ To ještě automaticky neznamená, že každá z těchto desek bude mít ve vše
 ### Linux
 
 1. Nainstalujte distribuční balíček aplikace.
-2. Ověřte přístup k ST-Link bez sudo.
-3. Připojte desku a spusťte Sniffy.
+2. Zajistěte, že má váš uživatel přístup k USB debug zařízením (doporučené jednorázové nastavení):
+
+  ```bash
+  sudo usermod -aG plugdev $USER
+  ```
+
+  Poté se odhlaste a znovu přihlaste.
+
+3. Ověřte přístup k ST-Link bez sudo.
+
+  ```bash
+  st-info --probe
+  ```
+
+  Pokud `st-info` chybí, doinstalujte jej:
+
+  ```bash
+  sudo apt install stlink-tools
+  ```
+
+  Pokud se deska stále nezobrazuje, po přihlášení ji odpojte a znovu připojte.
+4. Připojte desku a spusťte Sniffy.
 
 ### Co se stane po startu aplikace
 
