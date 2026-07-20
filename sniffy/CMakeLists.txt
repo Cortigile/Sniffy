@@ -347,6 +347,19 @@ if(WIN32)
     
     # Install ST-Link config folder structure (config/chips)
     install(DIRECTORY "${STLINK_ROOT}/config/chips" DESTINATION bin/config)
+
+    # Optionally package vendor ST-Link Windows driver bundle (if provided in repo).
+    # This is separate from libstlink and can be used on clean Windows machines.
+    option(SNIFFY_REQUIRE_STLINK_DRIVERS "Require Windows ST-Link driver payload during packaging" OFF)
+    set(SNIFFY_STLINK_DRIVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/drivers/windows")
+    if(EXISTS "${SNIFFY_STLINK_DRIVER_DIR}")
+        install(DIRECTORY "${SNIFFY_STLINK_DRIVER_DIR}/" DESTINATION drivers/stlink)
+        message(STATUS "Including ST-Link Windows driver payload: ${SNIFFY_STLINK_DRIVER_DIR}")
+    elseif(SNIFFY_REQUIRE_STLINK_DRIVERS)
+        message(FATAL_ERROR "Required ST-Link Windows driver payload not found at: ${SNIFFY_STLINK_DRIVER_DIR}")
+    else()
+        message(WARNING "ST-Link Windows driver payload not found at: ${SNIFFY_STLINK_DRIVER_DIR} (continuing without bundled drivers)")
+    endif()
     
     # 3. Use windeployqt to automatically copy Qt DLLs during packaging
     # We re-find here to ensure variables are available in this scope/if block
@@ -400,6 +413,8 @@ if(WIN32)
     endif()
 
     set(CPACK_NSIS_MODIFY_PATH ON) # Allow adding to PATH
+    set(CPACK_PACKAGE_EXECUTABLES "${PROJECT_NAME}" "Sniffy")
+    set(CPACK_CREATE_DESKTOP_LINKS "${PROJECT_NAME}")
     set(CPACK_NSIS_MENU_LINKS "bin/${PROJECT_NAME}.exe" "Sniffy") # Add Start Menu shortcut
 
     # Add Desktop Shortcut (NSIS only)
