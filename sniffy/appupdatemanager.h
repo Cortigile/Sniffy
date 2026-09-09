@@ -63,7 +63,7 @@ private:
     QString targetDownloadPath(const ReleaseInfo &release) const;
     QString installedExecutablePath() const;
     QString installedRootPath() const;
-    bool prepareInstallerHandoff(const QString &installerPath, QString *errorMessage, QString *launchMessage);
+    bool prepareInstallerHandoff(const QString &installerPath, QString *errorMessage);
     QString createWindowsInstallerScript(const QString &installerPath, QString *errorMessage) const;
     QString createLinuxInstallerScript(const QString &installerPath, QString *errorMessage) const;
     QString quoteForPowerShell(const QString &value) const;

@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDevice>
 #include <QFileInfo>
@@ -14,6 +15,8 @@
 #include <QProcess>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QTemporaryFile>
+#include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVersionNumber>
@@ -335,16 +338,18 @@ void AppUpdateManager::handleDownloadReply(QNetworkReply *reply)
     m_downloadFile = nullptr;
 
     QString errorMessage;
-    QString launchMessage;
-    if (!prepareInstallerHandoff(m_downloadTargetPath, &errorMessage, &launchMessage)) {
+    if (!prepareInstallerHandoff(m_downloadTargetPath, &errorMessage)) {
         failInstall(errorMessage);
         return;
     }
 
     clearDownloadState();
     emit updateStatusTextChanged(QStringLiteral("Update package ready: %1").arg(m_availableRelease.version));
-    emit popupMessageRequested(launchMessage);
+#ifdef Q_OS_WIN
+    m_installInProgress = true;
+#else
     emit quitRequested();
+#endif
 }
 
 void AppUpdateManager::failInstall(const QString &message)
@@ -412,7 +417,7 @@ QString AppUpdateManager::installedExecutablePath() const
 
 QString AppUpdateManager::installedRootPath() const
 {
-    const QFileInfo appInfo(QCoreApplication::applicationFilePath());
+    const QFileInfo appInfo(installedExecutablePath());
     QDir appDir = appInfo.dir();
     if (appDir.dirName().compare(QStringLiteral("bin"), Qt::CaseInsensitive) == 0 && appDir.cdUp()) {
         return QDir::toNativeSeparators(appDir.absolutePath());
@@ -441,7 +446,7 @@ bool AppUpdateManager::writeDownloadChunk(QNetworkReply *reply, QString *errorMe
     return true;
 }
 
-bool AppUpdateManager::prepareInstallerHandoff(const QString &installerPath, QString *errorMessage, QString *launchMessage)
+bool AppUpdateManager::prepareInstallerHandoff(const QString &installerPath, QString *errorMessage)
 {
     if (!QFileInfo::exists(installerPath)) {
         if (errorMessage != nullptr) {
@@ -456,26 +461,44 @@ bool AppUpdateManager::prepareInstallerHandoff(const QString &installerPath, QSt
         return false;
     }
 
-    const bool started = QProcess::startDetached(
-        QStringLiteral("powershell.exe"),
-        {
-            QStringLiteral("-NoProfile"),
-            QStringLiteral("-ExecutionPolicy"),
-            QStringLiteral("Bypass"),
-            QStringLiteral("-File"),
-            QDir::toNativeSeparators(scriptPath)
-        }
-    );
-    if (!started) {
+    const QString readyPath = scriptPath + QStringLiteral(".ready");
+    const QString cancelPath = scriptPath + QStringLiteral(".cancel");
+    const QString logPath = scriptPath + QStringLiteral(".log");
+    QProcess helper;
+    helper.setProgram(QDir(qEnvironmentVariable("SystemRoot")).filePath(
+        QStringLiteral("System32/WindowsPowerShell/v1.0/powershell.exe")));
+    helper.setArguments({QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"),
+                        QStringLiteral("-WindowStyle"), QStringLiteral("Hidden"),
+                        QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"),
+                        QStringLiteral("-File"), QDir::toNativeSeparators(scriptPath)});
+    helper.setWorkingDirectory(QFileInfo(scriptPath).absolutePath());
+    helper.setStandardInputFile(QProcess::nullDevice());
+    helper.setStandardOutputFile(logPath);
+    helper.setStandardErrorFile(scriptPath + QStringLiteral(".stderr.log"));
+    if (!helper.startDetached()) {
         if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("Unable to launch the Windows installer helper process.");
+            *errorMessage = QStringLiteral("Unable to launch the Windows update helper: %1").arg(helper.errorString());
         }
         return false;
     }
 
-    if (launchMessage != nullptr) {
-        *launchMessage = QStringLiteral("The silent update will start after Sniffy closes and the app will relaunch when installation finishes.");
-    }
+    QElapsedTimer elapsed;
+    elapsed.start();
+    auto *timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, [this, timer, readyPath, cancelPath, logPath, elapsed]() {
+        if (QFileInfo::exists(readyPath)) {
+            timer->stop();
+            timer->deleteLater();
+            emit quitRequested();
+        } else if (elapsed.elapsed() >= 10000) {
+            timer->stop();
+            timer->deleteLater();
+            QFile cancel(cancelPath);
+            cancel.open(QIODevice::WriteOnly);
+            failInstall(QStringLiteral("The update helper did not become ready. Sniffy remains open. See %1 and the adjacent stderr log.").arg(logPath));
+        }
+    });
+    timer->start(100);
     return true;
 #elif defined(Q_OS_LINUX)
     const QString scriptPath = createLinuxInstallerScript(installerPath, errorMessage);
@@ -490,10 +513,6 @@ bool AppUpdateManager::prepareInstallerHandoff(const QString &installerPath, QSt
         }
         return false;
     }
-
-    if (launchMessage != nullptr) {
-        *launchMessage = QStringLiteral("The update will continue after Sniffy closes. Linux may request administrator authorization to install the package.");
-    }
     return true;
 #else
     const bool opened = QDesktopServices::openUrl(QUrl::fromLocalFile(installerPath));
@@ -502,9 +521,6 @@ bool AppUpdateManager::prepareInstallerHandoff(const QString &installerPath, QSt
             *errorMessage = QStringLiteral("Unable to open the downloaded update package.");
         }
         return false;
-    }
-    if (launchMessage != nullptr) {
-        *launchMessage = QStringLiteral("The downloaded update package was opened.");
     }
     return true;
 #endif
@@ -520,9 +536,8 @@ QString AppUpdateManager::createWindowsInstallerScript(const QString &installerP
         return QString();
     }
 
-    const QString scriptPath = QDir(directory).filePath(QStringLiteral("install-update-%1.ps1").arg(QCoreApplication::applicationPid()));
-    QFile script(scriptPath);
-    if (!script.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+    QTemporaryFile script(QDir(directory).filePath(QStringLiteral("install-update-XXXXXX.ps1")));
+    if (!script.open()) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("Unable to write the Windows installer helper script.");
         }
@@ -531,36 +546,76 @@ QString AppUpdateManager::createWindowsInstallerScript(const QString &installerP
 
     const QString appPath = installedExecutablePath();
     const QString installRoot = installedRootPath();
-    const QString body = QStringLiteral(
-        "$installer = '%1'\n"
-        "$appPath = '%2'\n"
-        "$installRoot = '%3'\n"
-        "$pidToWait = %4\n"
-        "while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {\n"
-        "    Start-Sleep -Milliseconds 500\n"
-        "}\n"
-        "$installerLower = $installer.ToLowerInvariant()\n"
-        "try {\n"
-        "    if ($installerLower.EndsWith('.msi')) {\n"
-        "        Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $installer, '/qn', '/norestart', \"INSTALLDIR=$installRoot\") -Wait | Out-Null\n"
-        "    } else {\n"
-        "        Start-Process -FilePath $installer -ArgumentList @('/S', \"/D=$installRoot\") -Wait | Out-Null\n"
-        "    }\n"
-        "} finally {\n"
-        "    if (Test-Path -LiteralPath $appPath) {\n"
-        "        Start-Process -FilePath $appPath | Out-Null\n"
-        "    }\n"
-        "    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n"
-        "}\n")
+    const QString body = QStringLiteral(R"PS($ErrorActionPreference = 'Stop'
+$installer = '%1'
+$appPath = '%2'
+$installRoot = '%3'
+$pidToWait = %4
+$readyPath = $PSCommandPath + '.ready'
+$cancelPath = $PSCommandPath + '.cancel'
+$appExited = $false
+$failed = $false
+function Write-UpdateLog([string]$message) {
+    Write-Output ((Get-Date -Format o) + ' ' + $message)
+}
+try {
+    Write-UpdateLog ('Helper started for PID ' + $pidToWait)
+    $parentProcess = Get-Process -Id $pidToWait -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $cancelPath) { throw 'Update handoff was cancelled.' }
+    [IO.File]::WriteAllText($readyPath, 'ready')
+    if ($null -ne $parentProcess -and -not $parentProcess.WaitForExit(20000)) {
+        throw 'Sniffy did not exit within 20 seconds. Installer was not started.'
+    }
+    if (Test-Path -LiteralPath $cancelPath) { throw 'Update handoff was cancelled.' }
+    $appExited = $true
+    Write-UpdateLog ('Launching installer ' + $installer)
+    if ([IO.Path]::GetExtension($installer) -ieq '.msi') {
+        $arguments = '/i "' + $installer + '" /qn /norestart INSTALL_ROOT="' + $installRoot + '"'
+        $process = Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" -Verb RunAs -ArgumentList $arguments -Wait -PassThru
+    } else {
+        $process = Start-Process -FilePath $installer -Verb RunAs -ArgumentList ('/S /D=' + $installRoot) -Wait -PassThru
+    }
+    Write-UpdateLog ('Installer exit code: ' + $process.ExitCode)
+    if ($process.ExitCode -notin @(0, 3010)) { throw ('Installer failed with exit code ' + $process.ExitCode) }
+} catch {
+    $failed = $true
+    Write-UpdateLog ('Update failed: ' + $_.Exception.Message)
+} finally {
+    if ($appExited) {
+        try {
+            Write-UpdateLog ('Relaunching app from ' + $appPath)
+            $restarted = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path -Parent $appPath) -PassThru
+            Write-UpdateLog ('Relaunch started with PID ' + $restarted.Id)
+        } catch {
+            $failed = $true
+            Write-UpdateLog ('Relaunch failed: ' + $_.Exception.Message)
+        }
+    }
+    Remove-Item -LiteralPath $readyPath, $cancelPath -Force -ErrorAction SilentlyContinue
+    if (-not $failed) { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue }
+}
+if ($failed) {
+    $notification = New-Object -ComObject WScript.Shell
+    $notification.Popup("Sniffy update failed. Details are in:`n$PSCommandPath.log", 0, 'Sniffy update', 48) | Out-Null
+    exit 1
+}
+)PS")
         .arg(
             quoteForPowerShell(QDir::toNativeSeparators(installerPath)),
             quoteForPowerShell(appPath),
             quoteForPowerShell(installRoot),
             QString::number(QCoreApplication::applicationPid())
         );
-    script.write(body.toUtf8());
+    const QByteArray scriptBytes = QByteArray::fromHex("efbbbf") + body.toUtf8();
+    if (script.write(scriptBytes) != scriptBytes.size() || !script.flush()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Unable to finish writing the Windows update helper.");
+        }
+        return QString();
+    }
+    script.setAutoRemove(false);
     script.close();
-    return scriptPath;
+    return script.fileName();
 }
 
 QString AppUpdateManager::createLinuxInstallerScript(const QString &installerPath, QString *errorMessage) const

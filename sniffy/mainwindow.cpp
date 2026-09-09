@@ -32,6 +32,7 @@ Right - area for dock widgets
 #include <QToolTip>
 #include <QScreen>
 #include <QGuiApplication>
+#include <QCoreApplication>
 #include <QPointer>
 #include "GUI/toastwidget.h"
 
@@ -378,7 +379,10 @@ void MainWindow::openSettingDialog()
 
 void MainWindow::handleUpdateQuitRequested()
 {
-    close();
+    if (deviceMediator != nullptr) {
+        deviceMediator->closeApp();
+    }
+    QCoreApplication::quit();
 }
 
 void MainWindow::showBottomLeftPopup(const QString &text)

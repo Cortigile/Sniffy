@@ -400,6 +400,7 @@ if(WIN32)
     # Use NSIS (Nullsoft Scriptable Install System) to create a .exe installer
     # AND WIX for .msi installer
     set(CPACK_GENERATOR "NSIS;WIX")
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "Sniffy")
     set(CPACK_NSIS_DISPLAY_NAME "Sniffy")
     set(CPACK_NSIS_PACKAGE_NAME "Sniffy Installer")
     
