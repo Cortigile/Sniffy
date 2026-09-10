@@ -109,7 +109,7 @@ void Authenticator::startRequest(const QString &email, const QString &deviceName
                 << "Session:" << currentSessionId;
     
     // Use auth_check for renewal or polling, auth_start is only used from browser
-    QUrl authUrl(QStringLiteral("https://sniffylab.com/scripts/sniffy_auth_check.php"));
+    QUrl authUrl(QStringLiteral("https://sniffylab.com/scripts/sniffy_auth_check_sec.php"));
     
     QUrlQuery query;
     query.addQueryItem("email", email);
@@ -171,7 +171,7 @@ void Authenticator::onFinished(QNetworkReply *reply)
     if (timeoutTimer) timeoutTimer->stop();
     if (reply != currentReply) { reply->deleteLater(); return; }
     currentReply = nullptr;
-    const bool forceReconnect = authenticationSentManual;
+    bool forceReconnect = authenticationSentManual;
     
     // Don't emit requestFinished during polling - keep the UI in "waiting" state
     if (!pollTimer->isActive()) {
@@ -205,7 +205,7 @@ void Authenticator::onFinished(QNetworkReply *reply)
     reply->deleteLater();
 
     // Debug: Print the raw response
-    qDebug() << "[Auth] Raw response from sniffy_auth_check.php:" << data;
+    qDebug() << "[Auth] Raw response from sniffy_auth_check_sec.php:" << data;
     qDebug() << "[Auth] Response size:" << data.size() << "bytes";
 
     // Parse JSON response
@@ -240,7 +240,7 @@ void Authenticator::onFinished(QNetworkReply *reply)
         const QString serverError = jsonObj["error"].toString().trimmed();
         qDebug() << "[Auth] Error response received:" << serverError;
 
-        // Error codes are wrapped in a random salt by sniffy_auth_check.php,
+        // Error codes are wrapped in a random salt by sniffy_auth_check_sec.php,
         // for example: AB-ERR-08-CD. Extract the stable ERR-xx code first.
         const QRegularExpression errorCodePattern(QStringLiteral("(?:^|-)\\b(ERR-[0-9]{2})\\b(?:-|$)"),
                                QRegularExpression::CaseInsensitiveOption);
@@ -332,9 +332,15 @@ void Authenticator::onFinished(QNetworkReply *reply)
     QDateTime previousValidity = CustomSettings::getTokenValidity();
 
     // Manual login success should reopen the device once so the MCU receives
-    // the new token. Background refreshes must not cause a reconnect loop.
+    // the new token. Background refreshes must not normally cause a reconnect loop,
+    // except when they silently upgrade a currently-connected demo device to a real
+    // license - the MCU only picks up a new token on the next handshake, so force one.
     QString context = jsonObj["context"].toString();
-    qDebug() << "[Auth] New Token generated: valid till" << validity.toString("yyyy-MM-dd") << "(Context:" << context << ") " << (forceReconnect ? "- forcing device reconnection" : "- no device reconnection");
+    const QString license = jsonObj.contains("license") ? jsonObj["license"].toString() : QString();
+    if (!authenticationSentManual && connectedInDemoMode && !license.isEmpty() && license != "DE") {
+        forceReconnect = true;
+    }
+    qDebug() << "[Auth] New Token generated: valid till" << validity.toString("yyyy-MM-dd") << "(Context:" << context << ", License:" << license << ") " << (forceReconnect ? "- forcing device reconnection" : "- no device reconnection");
     
     emit authenticationSucceeded(validity, token, forceReconnect);
     authenticationSentManual = false;

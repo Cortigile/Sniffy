@@ -6,6 +6,10 @@
 #include <QVersionNumber>
 #include <QtGlobal>
 
+#ifndef SNIFFY_PROTOCOL_VERSION
+#error "SNIFFY_PROTOCOL_VERSION must be provided by the build configuration"
+#endif
+
 namespace FirmwareCompatibility {
 
 struct ReleaseManifest {
@@ -32,7 +36,7 @@ inline QString applicationVersionText()
 
 inline quint32 supportedProtocolVersion()
 {
-    return 1U;
+    return SNIFFY_PROTOCOL_VERSION;
 }
 
 inline quint32 parseProtocolVersion(const QString &value, bool *ok = nullptr)
