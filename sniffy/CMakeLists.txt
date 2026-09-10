@@ -29,7 +29,23 @@ set(SNIFFY_VERSION_MAJOR "${CMAKE_MATCH_1}")
 set(SNIFFY_VERSION_MINOR "${CMAKE_MATCH_2}")
 set(SNIFFY_VERSION_PATCH "${CMAKE_MATCH_3}")
 
+string(REGEX MATCH "\\[compatibility\\][^[]*" SNIFFY_COMPATIBILITY_SECTION "${SNIFFY_RELEASE_VERSION_CONTENT}")
+if(NOT SNIFFY_COMPATIBILITY_SECTION)
+    message(FATAL_ERROR "Could not find [compatibility] section in ${SNIFFY_RELEASE_VERSION_FILE}")
+endif()
+
+string(REGEX MATCH "protocol_version[ \\t]*=[ \\t]*\"([0-9]+)\"" SNIFFY_PROTOCOL_VERSION_LINE "${SNIFFY_COMPATIBILITY_SECTION}")
+if(NOT SNIFFY_PROTOCOL_VERSION_LINE)
+    message(FATAL_ERROR "Could not read [compatibility].protocol_version from ${SNIFFY_RELEASE_VERSION_FILE}")
+endif()
+
+set(SNIFFY_PROTOCOL_VERSION "${CMAKE_MATCH_1}")
+if(SNIFFY_PROTOCOL_VERSION LESS 1)
+    message(FATAL_ERROR "Protocol version must be a positive integer. Got: ${SNIFFY_PROTOCOL_VERSION}")
+endif()
+
 message(STATUS "Building version: ${SNIFFY_DESKTOP_VERSION}")
+message(STATUS "Supported firmware protocol version: ${SNIFFY_PROTOCOL_VERSION}")
 
 # Use -O2 for release builds
 set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
@@ -153,6 +169,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     QT_DEPRECATED_WARNINGS
     QT_NO_FOREACH
     APP_VERSION=\"${SNIFFY_DESKTOP_VERSION}\"
+    SNIFFY_PROTOCOL_VERSION=${SNIFFY_PROTOCOL_VERSION}
 )
 
 # --- ST-Link & LibUSB Integration ---
