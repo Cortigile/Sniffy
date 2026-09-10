@@ -10,7 +10,7 @@
 DeviceMediator::DeviceMediator(Authenticator *auth, QObject *parent) 
     : QObject(parent), authenticator(auth)
 {
-    communication = new Comms();
+    communication = new Comms(this);
 
     connect(communication, SIGNAL(devicesScaned(QList<DeviceDescriptor>)), this, SLOT(newDeviceList(QList<DeviceDescriptor>)), Qt::QueuedConnection);
     connect(communication, &Comms::connectionOpened, this, &DeviceMediator::onConnectionOpened);
@@ -31,7 +31,12 @@ DeviceMediator::DeviceMediator(Authenticator *auth, QObject *parent)
     resourceManager.reset();
 }
 
-DeviceMediator::~DeviceMediator() {}
+DeviceMediator::~DeviceMediator()
+{
+    // Modules (Scope, etc.) call comm->write() from their destructors, so they must be
+    // torn down before communication - QObject child destruction order isn't guaranteed.
+    modules.clear();
+}
 
 QList<QSharedPointer<AbstractModule>> DeviceMediator::createModulesList()
 {
@@ -125,9 +130,9 @@ void DeviceMediator::onConnectionOpened(bool success)
             communication->write("SYST:TIME:" + QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss").toUtf8() + ";");
 
             QByteArray token = CustomSettings::getLoginToken();
-            // If token is hex string (256 chars), convert to bytes.
-            // If it's already bytes (128 chars from @ByteArray), use as is.
-            if (token.size() == 256) {
+            // If token is hex string (384 chars = 192-byte v2 frame), convert to bytes.
+            // If it's already bytes (192 chars from @ByteArray), use as is.
+            if (token.size() == 384) {
                 token = QByteArray::fromHex(token);
             }
 
@@ -147,15 +152,10 @@ void DeviceMediator::onConnectionOpened(bool success)
 
 void DeviceMediator::reopenDeviceAfterLogin()
 {
-    // Called when the login info changed. If we were connected to a device,
-    // briefly close and reopen so the MCU receives the new token handshake.
-    if (currentDeviceIndex < 0 || deviceList.isEmpty()) return;
-
-    // If not connected, nothing to do — open directly
-    if (!isConnected) {
-        device->connectDevice(currentDeviceIndex);
-        return;
-    }
+    // Only reopen if a device was actually connected before this login attempt.
+    // Otherwise there's nothing to reconnect - trying to open a stale/absent
+    // device just spams "wait for serport to be opened" and fails.
+    if (!isConnected || currentDeviceIndex < 0 || deviceList.isEmpty()) return;
 
     autoConnectOnSingleDevice = false;
     shutdownConnection(false);
