@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$QtRoot,
-    [Parameter(Mandatory = $true)][string]$MinGWRoot
+    [Parameter(Mandatory = $true)][string]$MinGWRoot,
+    [string]$PosixShell
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +48,12 @@ int main(int argc, char **argv)
             QFile ready(scriptPath + QStringLiteral(".ready"));
             return ready.open(QIODevice::WriteOnly) ? 0 : 5;
         }
+        if (qEnvironmentVariable("SNIFFY_TEST_HELPER_STATE") == QStringLiteral("preflight-failure")) {
+            QFile failure(scriptPath + QStringLiteral(".error"));
+            if (!failure.open(QIODevice::WriteOnly)) return 5;
+            failure.write("APT is required for automatic updates.");
+            return 6;
+        }
         return 6;
     }
 
@@ -55,8 +62,10 @@ int main(int argc, char **argv)
     QStandardPaths::setTestModeEnabled(true);
     AppUpdateManager manager;
     QString error;
-    if (arguments.value(1) == QStringLiteral("generate")) {
-        const QString path = manager.createWindowsInstallerScript(arguments.value(2), &error);
+    if (arguments.value(1).startsWith(QStringLiteral("generate"))) {
+        const QString path = arguments.value(1) == QStringLiteral("generate-linux")
+            ? manager.createLinuxInstallerScript(arguments.value(2), &error)
+            : manager.createWindowsInstallerScript(arguments.value(2), &error);
         QTextStream(stdout) << (path.isEmpty() ? error : path) << Qt::endl;
         return path.isEmpty() ? 1 : 0;
     }
@@ -175,7 +184,7 @@ int main(int argc, char **argv)
     [IO.Directory]::CreateDirectory($shimDirectory) | Out-Null
     Copy-Item -LiteralPath $executable -Destination (Join-Path $shimDirectory 'powershell.exe')
     $env:SystemRoot = $testRoot
-    foreach ($state in @('ready', 'startup-failure')) {
+    foreach ($state in @('ready', 'startup-failure', 'preflight-failure')) {
         $env:SNIFFY_TEST_HELPER_STATE = $state
         $output = @(& $executable handoff $installer)
         $expectedExit = $(if ($state -eq 'ready') { 0 } else { 2 })
@@ -186,6 +195,13 @@ int main(int argc, char **argv)
     $output = @(& $executable handoff $installer)
     Assert-True ($LASTEXITCODE -eq 2) "Missing shell did not keep the app open: $output"
     Write-Output 'PASS QProcess handoff: missing-shell'
+    $env:SystemRoot = $originalSystemRoot
+    if ($PosixShell) {
+        $helperPath = (& $executable generate-linux "/tmp/Installer's space & percent%.deb" | Out-String).Trim()
+        Assert-True ($LASTEXITCODE -eq 0) 'Linux helper generation failed'
+        & $PosixShell (Join-Path $PSScriptRoot 'test_app_update_linux.sh') $helperPath
+        Assert-True ($LASTEXITCODE -eq 0) 'Linux helper regressions failed'
+    }
 } finally {
     $env:SystemRoot = $originalSystemRoot
     $env:PATH = $originalPath

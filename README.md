@@ -40,6 +40,17 @@ If you installed the `stlink-tools` or `libstlink` package via your package mana
 	sudo udevadm trigger
 	```
 
+### In-App Updates
+
+Use the in-app update button to download and install a newer release, then restart Sniffy.
+Run the app as a normal user; only installation requests administrator authorization.
+
+- **Windows:** Requires Windows PowerShell 5.1; installation uses the EXE installer by default.
+- **Ubuntu/Debian:** Requires a DEB installation, `apt-get`, `pkexec`, and a desktop polkit agent. APT resolves dependencies but refuses package removals.
+
+On failure, check logs in the application's local data `updates` directory. There is no automatic rollback;
+use manual installation if automatic updates are unavailable.
+
 ## Usage
 
 1.  **Connect Hardware**: Plug your STM32 Nucleo board into your computer via USB.
@@ -76,6 +87,8 @@ cd sniffy
 cmake -S sniffy -B build
 cmake --build build
 ```
+
+For updater regression tests, see [tests/README.md](tests/README.md).
 
 ## License
 

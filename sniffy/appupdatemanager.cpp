@@ -345,7 +345,7 @@ void AppUpdateManager::handleDownloadReply(QNetworkReply *reply)
 
     clearDownloadState();
     emit updateStatusTextChanged(QStringLiteral("Update package ready: %1").arg(m_availableRelease.version));
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
     m_installInProgress = true;
 #else
     emit quitRequested();
@@ -457,27 +457,37 @@ bool AppUpdateManager::prepareInstallerHandoff(const QString &installerPath, QSt
 
 #ifdef Q_OS_WIN
     const QString scriptPath = createWindowsInstallerScript(installerPath, errorMessage);
+#elif defined(Q_OS_LINUX)
+    const QString scriptPath = createLinuxInstallerScript(installerPath, errorMessage);
+#endif
+#if defined(Q_OS_WIN) || defined(Q_OS_LINUX)
     if (scriptPath.isEmpty()) {
         return false;
     }
 
     const QString readyPath = scriptPath + QStringLiteral(".ready");
     const QString cancelPath = scriptPath + QStringLiteral(".cancel");
+    const QString failurePath = scriptPath + QStringLiteral(".error");
     const QString logPath = scriptPath + QStringLiteral(".log");
     QProcess helper;
+#ifdef Q_OS_WIN
     helper.setProgram(QDir(qEnvironmentVariable("SystemRoot")).filePath(
         QStringLiteral("System32/WindowsPowerShell/v1.0/powershell.exe")));
     helper.setArguments({QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"),
                         QStringLiteral("-WindowStyle"), QStringLiteral("Hidden"),
                         QStringLiteral("-ExecutionPolicy"), QStringLiteral("Bypass"),
                         QStringLiteral("-File"), QDir::toNativeSeparators(scriptPath)});
+#else
+    helper.setProgram(QStringLiteral("/bin/sh"));
+    helper.setArguments({scriptPath});
+#endif
     helper.setWorkingDirectory(QFileInfo(scriptPath).absolutePath());
     helper.setStandardInputFile(QProcess::nullDevice());
     helper.setStandardOutputFile(logPath);
     helper.setStandardErrorFile(scriptPath + QStringLiteral(".stderr.log"));
     if (!helper.startDetached()) {
         if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("Unable to launch the Windows update helper: %1").arg(helper.errorString());
+            *errorMessage = QStringLiteral("Unable to launch the update helper: %1").arg(helper.errorString());
         }
         return false;
     }
@@ -485,8 +495,15 @@ bool AppUpdateManager::prepareInstallerHandoff(const QString &installerPath, QSt
     QElapsedTimer elapsed;
     elapsed.start();
     auto *timer = new QTimer(this);
-    connect(timer, &QTimer::timeout, this, [this, timer, readyPath, cancelPath, logPath, elapsed]() {
-        if (QFileInfo::exists(readyPath)) {
+    connect(timer, &QTimer::timeout, this, [this, timer, readyPath, cancelPath, failurePath, logPath, elapsed]() {
+        if (QFileInfo::exists(failurePath)) {
+            timer->stop();
+            timer->deleteLater();
+            QFile failure(failurePath);
+            failure.open(QIODevice::ReadOnly);
+            failInstall(QStringLiteral("Update preparation failed: %1\nLog: %2")
+                            .arg(QString::fromUtf8(failure.readAll()).trimmed(), logPath));
+        } else if (QFileInfo::exists(readyPath)) {
             timer->stop();
             timer->deleteLater();
             emit quitRequested();
@@ -499,20 +516,6 @@ bool AppUpdateManager::prepareInstallerHandoff(const QString &installerPath, QSt
         }
     });
     timer->start(100);
-    return true;
-#elif defined(Q_OS_LINUX)
-    const QString scriptPath = createLinuxInstallerScript(installerPath, errorMessage);
-    if (scriptPath.isEmpty()) {
-        return false;
-    }
-
-    const bool started = QProcess::startDetached(QStringLiteral("/bin/sh"), {scriptPath});
-    if (!started) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("Unable to launch the Linux installer helper process.");
-        }
-        return false;
-    }
     return true;
 #else
     const bool opened = QDesktopServices::openUrl(QUrl::fromLocalFile(installerPath));
@@ -628,9 +631,8 @@ QString AppUpdateManager::createLinuxInstallerScript(const QString &installerPat
         return QString();
     }
 
-    const QString scriptPath = QDir(directory).filePath(QStringLiteral("install-update-%1.sh").arg(QCoreApplication::applicationPid()));
-    QFile script(scriptPath);
-    if (!script.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+    QTemporaryFile script(QDir(directory).filePath(QStringLiteral("install-update-XXXXXX.sh")));
+    if (!script.open()) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("Unable to write the Linux installer helper script.");
         }
@@ -638,38 +640,97 @@ QString AppUpdateManager::createLinuxInstallerScript(const QString &installerPat
     }
 
     const QString appPath = installedExecutablePath();
-    const QString body = QStringLiteral(
-        "#!/bin/sh\n"
-        "installer=%1\n"
-        "app_path=%2\n"
-        "pid_to_wait=%3\n"
-        "while kill -0 \"$pid_to_wait\" 2>/dev/null; do\n"
-        "  sleep 1\n"
-        "done\n"
-        "status=1\n"
-        "if command -v pkexec >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then\n"
-        "  pkexec dpkg -i \"$installer\"\n"
-        "  status=$?\n"
-        "elif [ \"$(id -u)\" -eq 0 ] && command -v dpkg >/dev/null 2>&1; then\n"
-        "  dpkg -i \"$installer\"\n"
-        "  status=$?\n"
-        "else\n"
-        "  xdg-open \"$installer\" >/dev/null 2>&1 &\n"
-        "  status=0\n"
-        "fi\n"
-        "if [ \"$status\" -eq 0 ] && [ -x \"$app_path\" ]; then\n"
-        "  nohup \"$app_path\" >/dev/null 2>&1 &\n"
-        "fi\n"
-        "rm -- \"$0\"\n")
+    const QString body = QStringLiteral(R"SH(#!/bin/sh
+umask 077
+installer=%1
+app_path=%2
+pid_to_wait=%3
+ready_path="$0.ready"
+cancel_path="$0.cancel"
+error_path="$0.error"
+log_path="$0.log"
+app_exited=false
+status=1
+
+report_failure() {
+    printf '%s\n' "$1" >&2
+    printf '%s\n' "$1" > "$error_path"
+}
+
+finish() {
+    trap - EXIT
+    rm -f -- "$ready_path" "$cancel_path"
+    if [ "$app_exited" = true ]; then
+        if test -x "$app_path"; then
+            printf '%s\n' "Relaunching $app_path"
+            nohup "$app_path" >> "$log_path" 2>&1 < /dev/null &
+        else
+            status=1
+            report_failure "Sniffy executable is missing after installation: $app_path"
+        fi
+    fi
+    if [ "$status" -eq 0 ]; then
+        rm -f -- "$0"
+    elif [ "$app_exited" = true ]; then
+        message="Sniffy update failed. See $log_path and $0.stderr.log"
+        if command -v kdialog >/dev/null 2>&1; then
+            kdialog --error "$message"
+        elif command -v zenity >/dev/null 2>&1; then
+            zenity --error --text="$message"
+        elif command -v notify-send >/dev/null 2>&1; then
+            notify-send --urgency=critical 'Sniffy update' "$message"
+        fi
+    fi
+    exit "$status"
+}
+trap finish EXIT
+trap 'report_failure "Update helper interrupted."; exit 1' HUP INT TERM
+
+printf '%s\n' "Helper started for PID $pid_to_wait"
+case "$installer" in
+    /*.deb) ;;
+    *) report_failure 'Automatic updates require an absolute path to a DEB package.'; exit 1 ;;
+esac
+apt_get=$(command -v apt-get) || { report_failure 'APT is required for automatic updates.'; exit 1; }
+if [ "$(id -u)" -ne 0 ]; then
+    command -v pkexec >/dev/null 2>&1 || { report_failure 'Install polkit/pkexec to enable automatic updates.'; exit 1; }
+fi
+[ -f "$cancel_path" ] && { report_failure 'Update handoff was cancelled.'; exit 1; }
+: > "$ready_path" || exit 1
+attempts=0
+while kill -0 "$pid_to_wait" 2>/dev/null; do
+    [ -f "$cancel_path" ] && { report_failure 'Update handoff was cancelled.'; exit 1; }
+    [ "$attempts" -ge 20 ] && { report_failure 'Sniffy did not exit within 20 seconds.'; exit 1; }
+    sleep 1
+    attempts=$((attempts + 1))
+done
+[ -f "$cancel_path" ] && { report_failure 'Update handoff was cancelled.'; exit 1; }
+app_exited=true
+if [ "$(id -u)" -eq 0 ]; then
+    DEBIAN_FRONTEND=noninteractive "$apt_get" -y --no-remove -o Dpkg::Options::=--force-confold install "$installer"
+else
+    pkexec /usr/bin/env DEBIAN_FRONTEND=noninteractive "$apt_get" -y --no-remove -o Dpkg::Options::=--force-confold install "$installer"
+fi
+status=$?
+printf '%s\n' "Installer exit code: $status"
+[ "$status" -eq 0 ] || report_failure "Installation failed or authorization was cancelled (exit $status)."
+exit "$status"
+)SH")
         .arg(
             quoteForShell(installerPath),
             quoteForShell(appPath),
             QString::number(QCoreApplication::applicationPid())
         );
-    script.write(body.toUtf8());
+    const QByteArray scriptBytes = body.toUtf8();
+    if (script.write(scriptBytes) != scriptBytes.size() || !script.flush()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Unable to finish writing the Linux update helper.");
+        }
+        return QString();
+    }
+    script.setAutoRemove(false);
     script.close();
-    script.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
-    return scriptPath;
+    return script.fileName();
 }
 
 QString AppUpdateManager::quoteForPowerShell(const QString &value) const
