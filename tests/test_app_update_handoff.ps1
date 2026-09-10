@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../sniffy'))
+$sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../sniffy'))
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('sniffy-updater-test-' + [guid]::NewGuid().ToString('N'))
 $appDirectory = Join-Path $testRoot ("App's space & percent% " + [char]0x010D + '/bin')
 $executable = Join-Path $appDirectory 'sniffy.exe'
