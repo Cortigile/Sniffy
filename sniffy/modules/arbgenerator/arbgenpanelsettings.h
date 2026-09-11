@@ -5,13 +5,13 @@
 #include <QVBoxLayout>
 #include <QScrollArea>
 
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetdial.h"
-#include "../../GUI/widgetdialrange.h"
-#include "../../GUI/widgetswitch.h"
-#include "../../GUI/widgetbuttons.h"
-#include "../../GUI/widgettextinput.h"
-#include "../../GUI/widgetlabel.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
+#include "gui/widgetswitch.h"
+#include "gui/widgetbuttons.h"
+#include "gui/widgettextinput.h"
+#include "gui/widgetlabel.h"
 
 #include "../labelformator.h"
 

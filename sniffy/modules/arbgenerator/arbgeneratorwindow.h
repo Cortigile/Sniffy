@@ -8,17 +8,17 @@
 #include <QFileDialog>
 #include <QtMath>
 
-#include "../../GUI/widgetcontrolmodule.h"
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetdial.h"
-#include "../../GUI/widgetdialrange.h"
-#include "../../GUI/widgetbuttons.h"
-#include "../../GUI/widgetlabel.h"
-#include "../../GUI/widgetselection.h"
-#include "../../GUI/widgetchart.h"
-#include "../../GUI/widgettab.h"
-#include "../../GUI/widgetlabelarea.h"
-#include "../../GUI/widgettextinput.h"
+#include "gui/widgetcontrolmodule.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
+#include "gui/widgetbuttons.h"
+#include "gui/widgetlabel.h"
+#include "gui/widgetselection.h"
+#include "gui/widgetchart.h"
+#include "gui/widgettab.h"
+#include "gui/widgetlabelarea.h"
+#include "gui/widgettextinput.h"
 
 #include "arbgeneratorconfig.h"
 #include "arbgenpanelsettings.h"

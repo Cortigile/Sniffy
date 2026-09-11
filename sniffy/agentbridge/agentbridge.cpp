@@ -1,5 +1,5 @@
 #include "agentbridge.h"
-#include "devicemediator.h"
+#include "app/devicemediator.h"
 #include "modules/abstractmodule.h"
 
 #include <cmath>
@@ -10,9 +10,9 @@
 #include "communication/comms.h"
 #include "communication/commands.h"
 #include "communication/serialLine.h"
-#include "GUI/widgetcontrolmodule.h"
-#include "GUI/widgetbuttons.h"
-#include "GUI/widgetdisplay.h"
+#include "gui/widgetcontrolmodule.h"
+#include "gui/widgetbuttons.h"
+#include "gui/widgetdisplay.h"
 
 // GUI-synced RPCs — module-specific headers
 #include "modules/syncpwm/syncpwmwindow.h"
@@ -28,7 +28,7 @@
 #include "modules/scope/panelsettings.h"
 #include "modules/scope/panelmeasurement.h"
 #include "modules/scope/measurement.h"
-#include "GUI/widgettextinput.h"
+#include "gui/widgettextinput.h"
 #include "modules/voltagesource/voltagesourcewindow.h"
 #include "modules/arbgenerator/arbgeneratorwindow.h"
 #include "modules/arbgenerator/arbgenpanelsettings.h"
@@ -36,7 +36,7 @@
 #include "modules/patterngenerator/patterngeneratorsettings.h"
 #include "modules/voltmeter/voltmeterwindow.h"
 #include "modules/voltmeter/voltmeter.h"
-#include "GUI/widgetselection.h"
+#include "gui/widgetselection.h"
 #include <QTabWidget>
 
 // Specification headers — needed by get_system_config
@@ -48,7 +48,7 @@
 #include "modules/arbgenerator/arbgeneratorspec.h"
 #include "modules/patterngenerator/patterngeneratorspec.h"
 #include "modules/voltagesource/voltagesourcespec.h"
-#include "resourcemanager.h"
+#include "modules/resourcemanager.h"
 
 #include <algorithm>
 #include <QDataStream>

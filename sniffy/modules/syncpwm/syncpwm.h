@@ -7,7 +7,7 @@
 #include "communication/commands.h"
 #include "communication/comms.h"
 
-#include "../../GUI/widgetcontrolmodule.h"
+#include "gui/widgetcontrolmodule.h"
 
 #include "../abstractmodule.h"
 #include "../labelformator.h"

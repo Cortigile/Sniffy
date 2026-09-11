@@ -8,14 +8,14 @@
 #include <QDebug>
 #include <QString>
 
-#include "../../GUI/widgetcontrolmodule.h"
-#include "../../GUI/widgettab.h"
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetdial.h"
-#include "../../GUI/widgetdialrange.h"
-#include "../../GUI/widgetdisplay.h"
-#include "../../GUI/widgetswitch.h"
-#include "../../GUI/widgetbuttons.h"
+#include "gui/widgetcontrolmodule.h"
+#include "gui/widgettab.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
+#include "gui/widgetdisplay.h"
+#include "gui/widgetswitch.h"
+#include "gui/widgetbuttons.h"
 #include "../../graphics/graphics.h"
 
 #include "counterspec.h"

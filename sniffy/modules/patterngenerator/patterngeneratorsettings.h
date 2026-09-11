@@ -6,10 +6,10 @@
 #include <QVBoxLayout>
 #include <QMap>
 
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetselection.h"
-#include "../../GUI/widgetbuttons.h"
-#include "../../GUI/widgetdialrange.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetselection.h"
+#include "gui/widgetbuttons.h"
+#include "gui/widgetdialrange.h"
 
 #include "patterngeneratorspec.h"
 #include "patterngeneratorconfig.h"

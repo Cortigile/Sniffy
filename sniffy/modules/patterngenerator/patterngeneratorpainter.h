@@ -4,7 +4,7 @@
 #include <QObject>
 
 #include "patternchart.h"
-#include "../../GUI/widgetcustomplot.h"
+#include "gui/widgetcustomplot.h"
 
 #include "patterngeneratorconfig.h"
 #include "patterngeneratorpatterns.h"

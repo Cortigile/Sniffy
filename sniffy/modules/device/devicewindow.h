@@ -6,11 +6,11 @@
 #include <QFileInfo>
 #include <QSet>
 
-#include "../../GUI/widgetselection.h"
-#include "../../GUI/widgetbuttons.h"
-#include "../../GUI/widgetlabel.h"
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetdesciptionexpand.h"
+#include "gui/widgetselection.h"
+#include "gui/widgetbuttons.h"
+#include "gui/widgetlabel.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetdesciptionexpand.h"
 
 #include "devicespec.h"
 #include "pinoutwidget.h"

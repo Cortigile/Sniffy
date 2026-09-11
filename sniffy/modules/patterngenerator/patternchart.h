@@ -2,7 +2,7 @@
 #ifndef PATTERNCHART_H
 #define PATTERNCHART_H
 
-#include "../../GUI/widgetchart.h"
+#include "gui/widgetchart.h"
 #include <QGraphicsSimpleTextItem>
 #include <QtCharts/QChart>
 #include <QFontMetrics>

@@ -3,7 +3,7 @@
 
 #include <QObject>
 
-#include "../../GUI/widgetchart.h"
+#include "gui/widgetchart.h"
 
 #include "syncpwmconfig.h"
 #include "syncpwmdefs.h"

@@ -4,13 +4,13 @@
 #include <QWidget>
 #include <QSplitter>
 
-#include "../../GUI/widgetcontrolmodule.h"
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetdial.h"
-#include "../../GUI/widgetdialrange.h"
-#include "../../GUI/widgetchart.h"
-#include "../../GUI/widgetswitch.h"
-#include "../../GUI/widgetbuttons.h"
+#include "gui/widgetcontrolmodule.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
+#include "gui/widgetchart.h"
+#include "gui/widgetswitch.h"
+#include "gui/widgetbuttons.h"
 
 #include "syncpwmspec.h"
 #include "syncpwmconfig.h"

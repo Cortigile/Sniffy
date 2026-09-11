@@ -19,6 +19,10 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 try {
+    $releaseVersions = [IO.File]::ReadAllText((Join-Path $sourceRoot '../tools/release/versions.toml'))
+    $compatibility = [regex]::Match($releaseVersions, '(?m)^\[compatibility\][^\[]*').Value
+    $protocolVersion = [regex]::Match($compatibility, '(?m)^protocol_version\s*=\s*"([0-9]+)"').Groups[1].Value
+    Assert-True ($protocolVersion -match '^[0-9]+$' -and [uint32]$protocolVersion -gt 0) 'Missing or invalid compatibility.protocol_version'
     [IO.Directory]::CreateDirectory($appDirectory) | Out-Null
     $env:PATH = "$QtRoot/bin;$MinGWRoot/bin;$env:PATH"
     $harnessPath = Join-Path $testRoot 'handoff.cpp'
@@ -32,7 +36,7 @@ try {
 #include <QTextStream>
 #include <QTimer>
 #define private public
-#include "appupdatemanager.h"
+#include "updates/appupdatemanager.h"
 #undef private
 
 int main(int argc, char **argv)
@@ -83,11 +87,11 @@ int main(int argc, char **argv)
 }
 '@
     [IO.File]::WriteAllText($harnessPath, $harness)
-    & "$QtRoot/bin/moc.exe" "$sourceRoot/appupdatemanager.h" -o $mocPath
+    & "$QtRoot/bin/moc.exe" "$sourceRoot/updates/appupdatemanager.h" -o $mocPath
     Assert-True ($LASTEXITCODE -eq 0) 'moc failed'
-    & "$MinGWRoot/bin/g++.exe" -std=c++17 -fPIC "-I$sourceRoot" "-I$QtRoot/include" `
+    & "$MinGWRoot/bin/g++.exe" -std=c++17 -fPIC "-DSNIFFY_PROTOCOL_VERSION=$protocolVersion" "-I$sourceRoot" "-I$QtRoot/include" `
         "-I$QtRoot/include/QtCore" "-I$QtRoot/include/QtGui" "-I$QtRoot/include/QtNetwork" `
-        $harnessPath "$sourceRoot/appupdatemanager.cpp" $mocPath "-L$QtRoot/lib" `
+        $harnessPath "$sourceRoot/updates/appupdatemanager.cpp" $mocPath "-L$QtRoot/lib" `
         -lQt6Network -lQt6Gui -lQt6Core -o $executable
     Assert-True ($LASTEXITCODE -eq 0) 'Updater harness compilation failed'
     $env:SNIFFY_TEST_NAME = Split-Path -Leaf $testRoot

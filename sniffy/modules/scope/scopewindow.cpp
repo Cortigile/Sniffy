@@ -18,13 +18,13 @@ But it can be easily coppied so we can keep some template file.
 #include "paneladvanced.h"
 #include "scopeconfig.h"
 #include "../labelformator.h"
-#include "../../GUI/widgetchart.h"
-#include "../../GUI/widgetlabelarea.h"
-#include "../../GUI/widgetdial.h"
-#include "../../GUI/widgetdialrange.h"
-#include "../../GUI/widgetbuttons.h"
-#include "../../GUI/widgettab.h"
-#include "../../GUI/widgettextinput.h"
+#include "gui/widgetchart.h"
+#include "gui/widgetlabelarea.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
+#include "gui/widgetbuttons.h"
+#include "gui/widgettab.h"
+#include "gui/widgettextinput.h"
 
 namespace {
     inline void transformSeries(const QVector<QPointF> &src, QVector<QPointF> &dst, float offset, float invScale){

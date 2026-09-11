@@ -4,11 +4,11 @@
 #include <QObject>
 #include <QVBoxLayout>
 
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetdial.h"
-#include "../../GUI/widgetdialrange.h"
-#include "../../GUI/widgetswitch.h"
-#include "../../GUI/widgetbuttons.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
+#include "gui/widgetswitch.h"
+#include "gui/widgetbuttons.h"
 
 class PanelSettings : public QObject
 {

@@ -1,13 +1,13 @@
-#include "mainwindow.h"
+#include "app/mainwindow.h"
 
 #include <QSerialPort>
 
 #include <QApplication>
 #include <QStandardPaths>
 #include <QDir>
-#include "devicedescriptor.h"
+#include "communication/devicedescriptor.h"
 #include "modules/scope/measurement.h"
-#include "customsettings.h"
+#include "app/customsettings.h"
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>

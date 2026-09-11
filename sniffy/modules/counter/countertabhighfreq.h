@@ -5,11 +5,11 @@
 #include <QVBoxLayout>
 #include <QLabel>
 
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetdial.h"
-#include "../../GUI/widgetdialrange.h"
-#include "../../GUI/widgetswitch.h"
-#include "../../GUI/widgetbuttons.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
+#include "gui/widgetswitch.h"
+#include "gui/widgetbuttons.h"
 
 #include "counterdefs.h"
 

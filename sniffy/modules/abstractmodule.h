@@ -6,23 +6,23 @@
 #include <QApplication>
 #include <QFile>
 
-#include "../GUI/moduledockwidget.h"
-#include "../GUI/widgetcontrolmodule.h"
+#include "gui/moduledockwidget.h"
+#include "gui/widgetcontrolmodule.h"
 #include "../communication/comms.h"
 #include "../communication/commands.h"
 #include "../graphics/abstracttheme.h"
 #include "../graphics/themes/dark.h"
 #include "../graphics/themes/light.h"
 
-#include "../GUI/widgetbuttons.h"
-#include "../GUI/widgetdial.h"
-#include "../GUI/widgetdialrange.h"
-#include "../GUI/widgetswitch.h"
+#include "gui/widgetbuttons.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
+#include "gui/widgetswitch.h"
 #include "pinfunctioninfo.h"
-#include "../GUI/widgettab.h"
-#include "../GUI/widgetselection.h"
-#include "../GUI/widgettextinput.h"
-#include "../GUI/widgetchart.h"
+#include "gui/widgettab.h"
+#include "gui/widgetselection.h"
+#include "gui/widgettextinput.h"
+#include "gui/widgetchart.h"
 
 #include "abstractspecification.h"
 

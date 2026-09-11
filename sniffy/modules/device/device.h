@@ -7,8 +7,8 @@
 #include "devicespec.h"
 #include "../pinfunctioninfo.h"
 
-#include "../../GUI/widgetcontrolmodule.h"
-#include "../../GUI/moduledockwidget.h"
+#include "gui/widgetcontrolmodule.h"
+#include "gui/moduledockwidget.h"
 #include "../abstractmodule.h"
 #include "../errorlist.h"
 

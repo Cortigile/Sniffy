@@ -5,7 +5,7 @@
 #include <QDebug>
 #include <QDataStream>
 #include "../abstractspecification.h"
-#include "../../firmwarecompatibility.h"
+#include "firmware/firmwarecompatibility.h"
 
 class DeviceSpec : public AbstractSpecification
 {

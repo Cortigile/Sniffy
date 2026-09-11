@@ -11,7 +11,7 @@
 #include "math/movingaverage.h"
 #include "../labelformator.h"
 
-#include "../../GUI/widgetcontrolmodule.h"
+#include "gui/widgetcontrolmodule.h"
 
 #include "../abstractmodule.h"
 

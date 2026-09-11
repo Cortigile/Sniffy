@@ -4,14 +4,14 @@
 #include <QObject>
 #include <QVBoxLayout>
 
-#include "../../GUI/widgetbuttons.h"
-#include "../../GUI/widgetselection.h"
-#include "../../GUI/widgetseparator.h"
-#include "../../GUI/widgetlabel.h"
-#include "../../GUI/widgettextinput.h"
-#include "../../GUI/widgetswitch.h"
-#include "../../GUI/widgetdial.h"
-#include "../../GUI/widgetdialrange.h"
+#include "gui/widgetbuttons.h"
+#include "gui/widgetselection.h"
+#include "gui/widgetseparator.h"
+#include "gui/widgetlabel.h"
+#include "gui/widgettextinput.h"
+#include "gui/widgetswitch.h"
+#include "gui/widgetdial.h"
+#include "gui/widgetdialrange.h"
 
 #include "../labelformator.h"
 
