@@ -6,41 +6,54 @@ DeviceScanner::DeviceScanner(QObject *parent) : QThread(parent)
 
 DeviceScanner::~DeviceScanner()
 {
-    isRunning = false;
+    quit();
+    wait();
 }
 
 void DeviceScanner::searchForDevices(bool isSearchEnaled)
 {
+    QMutexLocker locker(&searchMutex);
     if (isSearchEnaled)
     {
-        shouldClearList.store(true, std::memory_order_relaxed);
+        shouldClearList = true;
     }
-    this->isSearchEnaled.store(isSearchEnaled, std::memory_order_relaxed);
+    this->isSearchEnaled = isSearchEnaled;
+    ++searchGeneration;
+    searchChanged.wakeAll();
 }
 
 void DeviceScanner::run()
 {
-    isRunning = true;
+    QMutexLocker locker(&searchMutex);
     QList<DeviceDescriptor> tempDeviceList;
-    while(isRunning.load(std::memory_order_relaxed)){
-        if(isSearchEnaled.load(std::memory_order_relaxed)){
-            if (shouldClearList.load(std::memory_order_relaxed))
-            {
-                currentDeviceList.clear();
-                shouldClearList.store(false, std::memory_order_relaxed);
-            }
-            tempDeviceList.clear();
-            SerialLine::getAvailableDevices(&tempDeviceList,0);
-
-            if(!deviceListsEqual(tempDeviceList,currentDeviceList)){
-                currentDeviceList = tempDeviceList;
-               // qDebug() << "new devices found"<<currentDeviceList.length();
-                isSearchEnaled.store(false, std::memory_order_relaxed);
-                emit newDevicesScanned(currentDeviceList);
-            }
-            QThread::msleep(500);
-        }else{
-            QThread::msleep(1000);
+    while (isRunning) {
+        while (isRunning && !isSearchEnaled) {
+            searchChanged.wait(&searchMutex);
+        }
+        if (!isRunning) {
+            break;
+        }
+        if (shouldClearList) {
+            currentDeviceList.clear();
+            shouldClearList = false;
+        }
+        const quint64 generation = searchGeneration;
+        tempDeviceList.clear();
+        locker.unlock();
+        SerialLine::getAvailableDevices(&tempDeviceList, 0);
+        locker.relock();
+        if (!isRunning || !isSearchEnaled || generation != searchGeneration) {
+            continue;
+        }
+        if (!deviceListsEqual(tempDeviceList, currentDeviceList)) {
+            currentDeviceList = tempDeviceList;
+            isSearchEnaled = false;
+            locker.unlock();
+            emit newDevicesScanned(tempDeviceList);
+            locker.relock();
+        }
+        if (isRunning && isSearchEnaled && generation == searchGeneration) {
+            searchChanged.wait(&searchMutex, 500);
         }
     }
 }
@@ -62,7 +75,9 @@ bool DeviceScanner::deviceListsEqual(QList<DeviceDescriptor> &listA, QList<Devic
 
 void DeviceScanner::quit()
 {
-    isRunning.store(false, std::memory_order_relaxed);
+    QMutexLocker locker(&searchMutex);
+    isRunning = false;
+    searchChanged.wakeAll();
 }
 
 

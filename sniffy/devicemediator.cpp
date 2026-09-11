@@ -14,6 +14,7 @@ DeviceMediator::DeviceMediator(Authenticator *auth, QObject *parent)
 
     connect(communication, SIGNAL(devicesScaned(QList<DeviceDescriptor>)), this, SLOT(newDeviceList(QList<DeviceDescriptor>)), Qt::QueuedConnection);
     connect(communication, &Comms::connectionOpened, this, &DeviceMediator::onConnectionOpened);
+    connect(communication, &Comms::connectionClosed, this, &DeviceMediator::onConnectionClosed, Qt::QueuedConnection);
     modules = createModulesList();
 
     connect(device, &Device::ScanDevices, this, &DeviceMediator::ScanDevices);
@@ -85,7 +86,7 @@ void DeviceMediator::ScanDevices()
 void DeviceMediator::newDeviceList(QList<DeviceDescriptor> deviceList)
 {
     // Ignore scan results while a device is connected (or mid-auth handshake).
-    if (isConnected || waitingForTokenAck)
+    if (isConnected || waitingForTokenAck || pendingReconnectRequest != 0)
         return;
 
     this->deviceList = deviceList;
@@ -94,6 +95,7 @@ void DeviceMediator::newDeviceList(QList<DeviceDescriptor> deviceList)
 
 void DeviceMediator::openDevice(int deviceIndex)
 {
+    pendingReconnectRequest = 0;
     // Remember which index is currently opened so we can reopen after login
     currentDeviceIndex = deviceIndex;
     communication->open(deviceList.at(deviceIndex));
@@ -173,18 +175,19 @@ void DeviceMediator::reopenDeviceAfterLogin()
     if (!isConnected || currentDeviceIndex < 0 || deviceList.isEmpty()) return;
 
     autoConnectOnSingleDevice = false;
-    shutdownConnection(false);
+    pendingReconnectRequest = shutdownConnection(false);
     ShowDeviceModule();
-    const quint64 generation = connectionGeneration;
+}
 
-    // Delay re-open so the serial thread has time to actually close the port.
-    // Without this delay, openDevice() would try to open the same COM port
-    // while the old handle is still being torn down in the serial thread.
-    QTimer::singleShot(300, this, [this, generation]() {
-        if (connectionGeneration == generation && currentDeviceIndex >= 0 && currentDeviceIndex < deviceList.size()) {
-            device->connectDevice(currentDeviceIndex);
-        }
-    });
+void DeviceMediator::onConnectionClosed(quint64 requestId)
+{
+    if (pendingReconnectRequest == 0 || pendingReconnectRequest != requestId) {
+        return;
+    }
+    pendingReconnectRequest = 0;
+    if (!isConnected && currentDeviceIndex >= 0 && currentDeviceIndex < deviceList.size()) {
+        device->connectDevice(currentDeviceIndex);
+    }
 }
 
 void DeviceMediator::onMassEraseRequested()
@@ -255,8 +258,9 @@ void DeviceMediator::closeModules()
 }
 
 
-void DeviceMediator::shutdownConnection(bool restartScanner)
+quint64 DeviceMediator::shutdownConnection(bool restartScanner)
 {
+    pendingReconnectRequest = 0;
     ++connectionGeneration;
     waitingForDeviceSpecification = false;
     waitingForAuthRecovery = false;
@@ -266,19 +270,21 @@ void DeviceMediator::shutdownConnection(bool restartScanner)
 
     disconnect(communication, &Comms::newData, this, &DeviceMediator::parseData);
     disconnect(communication, &Comms::communicationError, this, &DeviceMediator::handleError);
-    disconnectDevice(restartScanner);
+    return disconnectDevice(restartScanner);
 }
 
-void DeviceMediator::disconnectDevice(bool restartScanner)
+quint64 DeviceMediator::disconnectDevice(bool restartScanner)
 {
     if (isConnected)
     {
         if (authenticator) authenticator->setConnectedDevice(QString(), QString());
         emit saveLayoutUponExit();
         disableModules();
-        communication->close(restartScanner);
+        const quint64 requestId = communication->close(restartScanner);
         isConnected = false;
+        return requestId;
     }
+    return 0;
 }
 
 void DeviceMediator::blockConflictingModulesCallback(QString moduleName, int resources)

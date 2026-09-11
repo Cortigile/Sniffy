@@ -1,4 +1,5 @@
 #include "serialLine.h"
+#include <QMutex>
 
 namespace {
 
@@ -141,13 +142,14 @@ void SerialLine::openSerialLine(DeviceDescriptor desc){
     emit connectionOpened(success);
 }
 
-void SerialLine::closeLine(){
+void SerialLine::closeLine(quint64 requestId){
     if (serPort){
         serPort->flush();
         serPort->close();
     }
     setCurrentOpenPort(QString());
     isOpen = false;
+    emit connectionClosed(requestId);
 }
 
 void SerialLine::handleError(QSerialPort::SerialPortError error){

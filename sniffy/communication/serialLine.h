@@ -42,12 +42,13 @@ public:
 public slots:
     void write(const QByteArray &writeData);
     void openSerialLine(DeviceDescriptor desc);
-    void closeLine();
+    void closeLine(quint64 requestId = 0);
 
 signals:
         void newMessage(QByteArray message);
         void serialLineError(QByteArray error);
         void connectionOpened(bool success);
+        void connectionClosed(quint64 requestId);
 
 private slots:
         void handleError(QSerialPort::SerialPortError error);

@@ -19,7 +19,7 @@ class Comms : public QObject
 public:
     explicit Comms(QObject *parent = nullptr);
     ~Comms();
-    void close(bool restartScanner = true);
+    quint64 close(bool restartScanner = true);
     void open(DeviceDescriptor device);
     bool getIsOpen() const;
     void scanForDevices();
@@ -32,11 +32,12 @@ public:
 signals:
     void dataWrite(const QByteArray &data);
     void openLine(DeviceDescriptor desc);
-    void closeLine();
+    void closeLine(quint64 requestId);
     void newData(QByteArray message);
     void devicesScaned(QList<DeviceDescriptor> deviceList);
     void communicationError(QByteArray);
     void connectionOpened(bool success);
+    void connectionClosed(quint64 requestId);
 
 private slots:
     void parseMessage(QByteArray message);
@@ -47,6 +48,8 @@ private:
     std::unique_ptr<SerialLine> serial; // owned resource
     QThread *serialThread;              // Qt parented (this)
     DeviceScanner devScanner;           // QThread subclass member
+    quint64 connectionRequest = 0;
+    bool restartScannerOnClose = false;
 };
 
 #endif // COMMS_H

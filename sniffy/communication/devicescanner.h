@@ -4,7 +4,8 @@
 #include <QObject>
 #include <QThread>
 #include <QDateTime>
-#include <atomic>
+#include <QMutex>
+#include <QWaitCondition>
 
 #include "devicedescriptor.h"
 #include "serialLine.h"
@@ -24,9 +25,12 @@ signals:
 private:
     void run() override;
     bool deviceListsEqual(QList<DeviceDescriptor> &listA, QList<DeviceDescriptor> &listB);
-    std::atomic<bool> isSearchEnaled { false };
-    std::atomic<bool> isRunning { true };
-    std::atomic<bool> shouldClearList { false };
+    QMutex searchMutex;
+    QWaitCondition searchChanged;
+    bool isSearchEnaled = false;
+    bool isRunning = true;
+    bool shouldClearList = false;
+    quint64 searchGeneration = 0;
     QList<DeviceDescriptor> currentDeviceList;
     SerialLine serLine;
 

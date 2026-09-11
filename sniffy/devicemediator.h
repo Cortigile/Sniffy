@@ -51,7 +51,7 @@ signals:
 
 private:
     void wireRemainingModules();
-    void shutdownConnection(bool restartScanner);
+    quint64 shutdownConnection(bool restartScanner);
     void requestDeviceSpecification();
     void beginTokenAuthentication();
     void refreshDeviceToken();
@@ -82,6 +82,7 @@ private:
     bool waitingForAuthRecovery = false;
     QTimer *deviceSpecificationTimer = nullptr;
     quint64 connectionGeneration = 0;
+    quint64 pendingReconnectRequest = 0;
     QString pendingDevName;      // device name saved while waiting for ACK
     int     pendingDeviceIndex = -1; // device index saved while waiting for ACK
 
@@ -99,12 +100,13 @@ private slots:
     void handleError(QByteArray error);
     void ScanDevices();
     void openDevice(int deviceIndex);
-    void disconnectDevice(bool restartScanner = true);
+    quint64 disconnectDevice(bool restartScanner = true);
     void blockConflictingModulesCallback(QString moduleName, int resources);
     void releaseConflictingModulesCallback(QString moduleName, int resources);
     void onDeviceSpecificationReady();
     void finalizeDeviceOpen(int deviceIndex, QString devName);
     void onConnectionOpened(bool success);
+    void onConnectionClosed(quint64 requestId);
     void onTokenAckTimeout();
     void onDeviceSpecificationTimeout();
 
