@@ -95,16 +95,12 @@ FirmwareManager::FirmwareManager(Authenticator *auth, QObject *parent) : QObject
     connect(m_flasher, &StLinkFlasher::logMessage, this, &FirmwareManager::onFlashLog);
     connect(m_flasher, &StLinkFlasher::operationFinished, this, &FirmwareManager::onFlashFinished);
     connect(m_flasher, &StLinkFlasher::deviceConnected, this, &FirmwareManager::onDeviceConnected);
+    connect(m_flasher, &StLinkFlasher::deviceDisconnected, this, &FirmwareManager::onDeviceDisconnected);
     connect(m_flasher, &StLinkFlasher::operationStarted, this, &FirmwareManager::onOperationStarted);
     connect(m_flasher, &StLinkFlasher::deviceUIDAvailable, this, &FirmwareManager::onDeviceUIDAvailable);
     connect(m_flasher, &StLinkFlasher::deviceUIDError, this, &FirmwareManager::onDeviceUIDError);
 
-    // Authenticator for remote flow
-    m_auth = auth;
-    connect(m_auth, &Authenticator::requestStarted, this, &FirmwareManager::onAuthStarted);
-    connect(m_auth, &Authenticator::requestFinished, this, &FirmwareManager::onAuthFinished);
-    connect(m_auth, &Authenticator::authenticationFailed, this, &FirmwareManager::onAuthFailed);
-    connect(m_auth, &Authenticator::authenticationSucceeded, this, &FirmwareManager::onAuthSucceeded);
+    Q_UNUSED(auth);
 
     m_networkManager = new QNetworkAccessManager(this);
     connect(m_networkManager, &QNetworkAccessManager::finished, this, &FirmwareManager::onFirmwareDownloadFinished);
@@ -131,7 +127,6 @@ FirmwareManager::~FirmwareManager()
 
     delete m_flasher;
     m_flasher = nullptr;
-    // m_auth and m_networkManager are children, deleted automatically
 }
 
 void FirmwareManager::startUpdateProcess()
@@ -143,6 +138,7 @@ void FirmwareManager::startUpdateProcess()
     }
 
     m_currentOperation = OpFlash;
+    m_flashInProgress = true;
     m_pendingManifest = {};
     m_lastReadUidHex.clear();
     m_lastReadMcu.clear();
@@ -163,6 +159,7 @@ void FirmwareManager::startMassErase()
     }
 
     m_currentOperation = OpErase;
+    m_flashInProgress = true;
     m_pendingManifest = {};
     m_lastReadUidHex.clear();
     m_lastReadMcu.clear();
@@ -202,10 +199,27 @@ void FirmwareManager::onFlashLog(const QString &msg)
 
 void FirmwareManager::onFlashFinished(bool success, const QString &msg)
 {
-    const OperationType finishedOperation = m_currentOperation;
-
+    if (!m_flashInProgress || m_finishingOperation) return;
     emit statusMessage(msg, success ? Graphics::palette().running : Graphics::palette().error, success ? MsgSuccess : MsgError);
+    finishOperation(success);
+}
 
+void FirmwareManager::finishOperation(bool success)
+{
+    if (!m_flashInProgress || m_finishingOperation) return;
+    m_finishingOperation = true;
+    m_operationSucceeded = success;
+    QMetaObject::invokeMethod(m_flasher, "disconnectDevice", Qt::QueuedConnection);
+}
+
+void FirmwareManager::onDeviceDisconnected()
+{
+    if (!m_finishingOperation) return;
+    const bool success = m_operationSucceeded;
+    const OperationType finishedOperation = m_currentOperation;
+    m_flashInProgress = false;
+    m_finishingOperation = false;
+    m_currentOperation = OpNone;
     if (success)
     {
         emit progressChanged(100, 100);
@@ -215,12 +229,7 @@ void FirmwareManager::onFlashFinished(bool success, const QString &msg)
         }
     }
 
-    m_flashInProgress = false;
-    m_currentOperation = OpNone;
     emit operationFinished(success);
-
-    // Disconnect after operation
-    QMetaObject::invokeMethod(m_flasher, "disconnectDevice");
 }
 
 void FirmwareManager::onOperationStarted(const QString &operation)
@@ -244,35 +253,6 @@ void FirmwareManager::onDeviceUIDAvailable(const QString &uidHex, const QString 
 void FirmwareManager::onDeviceUIDError(const QString &message)
 {
     failOperation("Failed to read MCU ID: " + message);
-}
-
-void FirmwareManager::onAuthStarted()
-{
-    // Keep UI busy; already disabled by onOperationStarted
-}
-
-void FirmwareManager::onAuthFinished()
-{
-    // No-op; wait for success/fail signals
-}
-
-void FirmwareManager::onAuthFailed(const QString &code, const QString &uiMessage)
-{
-    Q_UNUSED(code);
-    failOperation(uiMessage);
-}
-
-void FirmwareManager::onAuthSucceeded(const QDateTime &validity, const QByteArray &token)
-{
-    Q_UNUSED(validity);
-    Q_UNUSED(token);
-
-    emit statusMessage("Remote auth OK", Graphics::palette().running, MsgSuccess);
-
-    // End operation cleanly for now
-    m_flashInProgress = false;
-    emit operationFinished(true);
-    QMetaObject::invokeMethod(m_flasher, "disconnectDevice");
 }
 
 void FirmwareManager::onFirmwareDownloadFinished(QNetworkReply *reply)
@@ -643,8 +623,7 @@ void FirmwareManager::requestFirmwareBinary(const QString &uidHex, const QString
 
 void FirmwareManager::failOperation(const QString &msg, int msgType)
 {
+    if (!m_flashInProgress || m_finishingOperation) return;
     emit statusMessage(msg, Graphics::palette().error, msgType);
-    m_flashInProgress = false;
-    emit operationFinished(false);
-    QMetaObject::invokeMethod(m_flasher, "disconnectDevice");
+    finishOperation(false);
 }

@@ -9,17 +9,20 @@ Comms::Comms(QObject *parent) : QObject(parent)
     connect(this,&Comms::dataWrite,serial.get(),&SerialLine::write);
     connect(serial.get(),&SerialLine::newMessage,this,&Comms::parseMessage);
     connect(serial.get(),&SerialLine::serialLineError,this,&Comms::errorReceived);
-    connect(serial.get(),&SerialLine::connectionOpened,this,&Comms::connectionOpened);
+    connect(serial.get(), &SerialLine::connectionOpened, this, [this](bool success) {
+        if (serialActivityEnabled) emit connectionOpened(success);
+    });
     connect(this,&Comms::openLine,serial.get(),&SerialLine::openSerialLine);
     connect(this,&Comms::closeLine,serial.get(),&SerialLine::closeLine);
     connect(serial.get(), &SerialLine::connectionClosed, this, [this](quint64 requestId) {
-        if (requestId != connectionRequest) {
-            return;
-        }
-        if (restartScannerOnClose) {
-            devScanner.searchForDevices(true);
-        }
-        emit connectionClosed(requestId);
+        if (requestId != connectionRequest) return;
+        serialClosedRequest = requestId;
+        finishCloseIfReady(requestId);
+    });
+    connect(&devScanner, &DeviceScanner::scanningPaused, this, [this](quint64 requestId) {
+        if (requestId != connectionRequest) return;
+        scannerPausedRequest = requestId;
+        finishCloseIfReady(requestId);
     });
     serialThread->start();
 
@@ -47,6 +50,7 @@ void Comms::open(DeviceDescriptor device){
         switch (device.connType) {
         case Connection::SERIAL:
             ++connectionRequest;
+            serialActivityEnabled = true;
             devScanner.searchForDevices(false);
             emit openLine(device);
             break;
@@ -63,10 +67,26 @@ void Comms::scanForDevices(){
 
 quint64 Comms::close(bool restartScanner){
     const quint64 requestId = ++connectionRequest;
+    serialActivityEnabled = false;
     restartScannerOnClose = restartScanner;
-    devScanner.searchForDevices(false);
+    serialClosedRequest = 0;
+    scannerPausedRequest = 0;
+    devScanner.pauseScanning(requestId);
     emit closeLine(requestId);
     return requestId;
+}
+
+void Comms::finishCloseIfReady(quint64 requestId)
+{
+    if (requestId != connectionRequest || serialClosedRequest != requestId || scannerPausedRequest != requestId) {
+        return;
+    }
+    serialClosedRequest = 0;
+    scannerPausedRequest = 0;
+    if (restartScannerOnClose) {
+        devScanner.searchForDevices(true);
+    }
+    emit connectionClosed(requestId);
 }
 
 void Comms::write(QByteArray module, QByteArray feature, QByteArray param){
@@ -112,6 +132,7 @@ void Comms::write(QByteArray data){
 }
 
 void Comms::errorReceived(QByteArray error){
+    if (!serialActivityEnabled) return;
     const quint64 requestId = connectionRequest;
     emit communicationError(error);
     if (requestId == connectionRequest) {
@@ -126,6 +147,7 @@ void Comms::devicesScanned(QList<DeviceDescriptor> deviceList)
 }
 
 void Comms::parseMessage(QByteArray message){
+    if (!serialActivityEnabled) return;
     //CRC can be checked here but it is not implemented
     //just pass the data
 #ifdef DEBUG_COMMS

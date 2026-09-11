@@ -115,9 +115,9 @@ MainWindow::MainWindow(QWidget *parent):
         });
     }
 
-    connect(sett, &SettingsDialog::firmwareFlashed, deviceMediator, &DeviceMediator::onFirmwareFlashed);
-    connect(sett, &SettingsDialog::massEraseRequested, deviceMediator, &DeviceMediator::onMassEraseRequested);
-    connect(sett, &SettingsDialog::massEraseCompleted, deviceMediator, &DeviceMediator::onMassEraseCompleted);
+    connect(sett, &SettingsDialog::firmwareOperationRequested, deviceMediator, &DeviceMediator::prepareFirmwareOperation);
+    connect(deviceMediator, &DeviceMediator::firmwareOperationReady, sett, &SettingsDialog::onFirmwareOperationReady);
+    connect(sett, &SettingsDialog::firmwareOperationFinished, deviceMediator, &DeviceMediator::finishFirmwareOperation);
     connect(deviceMediator,&DeviceMediator::loadLayoutUponOpen,this,&MainWindow::onOpenLoadSessionRequested,Qt::DirectConnection);
     connect(deviceMediator,&DeviceMediator::saveLayoutUponExit,this,&MainWindow::onExitSaveSessionRequested,Qt::DirectConnection);
 

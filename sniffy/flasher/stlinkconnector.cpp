@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 #include <QtSerialPort/QSerialPortInfo>
 #include <QTextStream>
+#include <algorithm>
 
 #include "stlink.h"
 extern "C"
@@ -20,35 +21,22 @@ extern "C"
 
 namespace {
 
+struct PreferredDevice
+{
+    QString port;
+    QString serial;
+};
+
 QMutex &preferredPortHintMutex()
 {
     static QMutex mutex;
     return mutex;
 }
 
-QString &preferredPortHintStorage()
+PreferredDevice &preferredPortHintStorage()
 {
-    static QString portName;
-    return portName;
-}
-
-QString takePreferredPortHint()
-{
-    QMutexLocker locker(&preferredPortHintMutex());
-    const QString portName = preferredPortHintStorage();
-    preferredPortHintStorage().clear();
-    return portName;
-}
-
-QString resolvePreferredPort()
-{
-    const QString hintedPort = takePreferredPortHint();
-    if (!hintedPort.isEmpty())
-    {
-        return hintedPort;
-    }
-
-    return SerialLine::currentOpenPort();
+    static PreferredDevice device;
+    return device;
 }
 
 QString resolveDebuggerSerialForPort(const QString &portName)
@@ -70,9 +58,37 @@ QString resolveDebuggerSerialForPort(const QString &portName)
     return QString();
 }
 
-bool serialMatches(const stlink_t *stlink, const QString &serial)
+PreferredDevice resolvePreferredDevice()
 {
-    return QString::fromLatin1(stlink->serial).trimmed().compare(serial, Qt::CaseInsensitive) == 0;
+    QMutexLocker locker(&preferredPortHintMutex());
+    const PreferredDevice hintedDevice = preferredPortHintStorage();
+    preferredPortHintStorage() = {};
+    locker.unlock();
+    if (!hintedDevice.port.isEmpty()) return hintedDevice;
+    const QString port = SerialLine::currentOpenPort();
+    return {port, resolveDebuggerSerialForPort(port)};
+}
+
+int connectedDebuggerCount()
+{
+    libusb_context *context = nullptr;
+    if (libusb_init(&context) != 0) return -1;
+    libusb_device **devices = nullptr;
+    const ssize_t count = libusb_get_device_list(context, &devices);
+    int debuggerCount = count < 0 ? -1 : 0;
+    for (ssize_t index = 0; index < count; ++index) {
+        libusb_device_descriptor descriptor = {};
+        if (libusb_get_device_descriptor(devices[index], &descriptor) != 0) {
+            debuggerCount = -1;
+            break;
+        }
+        if (descriptor.idVendor == STLINK_USB_VID_ST && STLINK_SUPPORTED_USB_PID(descriptor.idProduct)) {
+            ++debuggerCount;
+        }
+    }
+    if (devices) libusb_free_device_list(devices, 1);
+    libusb_exit(context);
+    return debuggerCount;
 }
 
 QString resolveChipsDir()
@@ -127,8 +143,13 @@ bool StLinkConnector::isConnected() const
 
 void StLinkConnector::setPreferredPortHint(const QString &portName)
 {
+    setPreferredPortHint(portName, resolveDebuggerSerialForPort(portName));
+}
+
+void StLinkConnector::setPreferredPortHint(const QString &portName, const QString &serialNumber)
+{
     QMutexLocker locker(&preferredPortHintMutex());
-    preferredPortHintStorage() = portName;
+    preferredPortHintStorage() = {portName, serialNumber.trimmed()};
 }
 
 bool StLinkConnector::init()
@@ -147,74 +168,53 @@ bool StLinkConnector::init()
         emit logMessage("Warning: Chips config dir not found. Tried app-relative and system locations.");
     }
 
-    // Probe for devices
-    stlink_t **stdevs;
-    size_t count = stlink_probe_usb(&stdevs, CONNECT_NORMAL, 0); // 0 for default freq
-    const QString preferredPort = resolvePreferredPort();
-    const QString preferredSerial = resolveDebuggerSerialForPort(preferredPort);
+    const PreferredDevice preferredDevice = resolvePreferredDevice();
+    const QString preferredPort = preferredDevice.port;
+    const QString preferredSerial = preferredDevice.serial;
 
-    if (count == 0)
+    if (!preferredPort.isEmpty())
     {
-        emit logMessage("No ST-Link devices found.");
-        return false;
-    }
-
-    size_t selectedIndex = 0;
-    if (count > 1 && !preferredPort.isEmpty())
-    {
-        if (preferredSerial.isEmpty())
+        const QByteArray serial = preferredSerial.toLatin1();
+        if (serial.isEmpty() || serial.size() >= STLINK_SERIAL_BUFFER_SIZE)
         {
             emit logMessage(QString("Failed to resolve ST-Link serial for active device port %1.").arg(preferredPort));
-            for (size_t i = 0; i < count; ++i)
-            {
-                stlink_close(stdevs[i]);
-            }
-            free(stdevs);
             return false;
         }
-
-        bool foundPreferredDevice = false;
-        for (size_t i = 0; i < count; ++i)
-        {
-            if (serialMatches(stdevs[i], preferredSerial))
-            {
-                selectedIndex = i;
-                foundPreferredDevice = true;
-                break;
-            }
-        }
-
-        if (!foundPreferredDevice)
-        {
-            emit logMessage(QString("Failed to find the ST-Link matching active device port %1 (serial %2).").arg(preferredPort, preferredSerial));
-            for (size_t i = 0; i < count; ++i)
-            {
-                stlink_close(stdevs[i]);
-            }
-            free(stdevs);
-            return false;
-        }
+        char serialFilter[STLINK_SERIAL_BUFFER_SIZE] = {};
+        std::copy(serial.cbegin(), serial.cend(), serialFilter);
+        emit logMessage(QString("Opening ST-Link for %1 (serial %2)...").arg(preferredPort, preferredSerial));
+        m_stlink = stlink_open_usb(UWARN, CONNECT_NORMAL, serialFilter, 0);
     }
-
-    // Open the selected device
-    m_stlink = stdevs[selectedIndex];
-
-    // Free other devices if any
-    if (count > 1)
+    else
     {
-        for (size_t i = 0; i < count; i++)
-        {
-            if (i != selectedIndex)
-            {
-                stlink_close(stdevs[i]);
-            }
+        const int connectedCount = connectedDebuggerCount();
+        if (connectedCount != 1) {
+            emit logMessage(connectedCount < 0 ? "Failed to enumerate USB devices."
+                            : connectedCount == 0 ? "No ST-Link devices found."
+                            : "Multiple ST-Link devices found. Connect to the target board in the app first, or leave only the target connected.");
+            return false;
         }
+        stlink_t **stdevs = nullptr;
+        const size_t count = stlink_probe_usb(&stdevs, CONNECT_NORMAL, 0);
+        if (count != 1)
+        {
+            emit logMessage(count == 0 ? "No accessible ST-Link devices found."
+                                       : "Multiple ST-Link devices found. Connect to the target board in the app first.");
+            for (size_t index = 0; index < count; ++index)
+            {
+                stlink_close(stdevs[index]);
+            }
+            free(stdevs);
+            return false;
+        }
+        m_stlink = stdevs[0];
+        free(stdevs);
     }
-    free(stdevs);
 
     if (!m_stlink)
     {
-        emit logMessage("Failed to open ST-Link device.");
+        emit logMessage(QString("Failed to open selected ST-Link (%1, serial %2). Check the board connection and other debugger tools.")
+                    .arg(preferredPort, preferredSerial));
         return false;
     }
 

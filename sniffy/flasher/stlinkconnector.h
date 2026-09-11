@@ -15,6 +15,7 @@ public:
     ~StLinkConnector();
 
     static void setPreferredPortHint(const QString &portName);
+    static void setPreferredPortHint(const QString &portName, const QString &serialNumber);
     bool init();
     void cleanup();
     stlink_t* handle() const;

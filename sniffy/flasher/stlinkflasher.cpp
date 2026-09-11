@@ -15,6 +15,7 @@ StLinkFlasher::StLinkFlasher(QObject *parent)
     connect(&m_writer, &StLinkWriter::operationStarted, this, &StLinkFlasher::operationStarted);
     connect(&m_writer, &StLinkWriter::operationFinished, [this](bool success, const QString &msg)
             {
+        m_connector.cleanup();
         m_flashing = false;
         emit operationFinished(success, msg); });
 
@@ -22,6 +23,7 @@ StLinkFlasher::StLinkFlasher(QObject *parent)
     connect(&m_eraser, &StLinkEraser::operationStarted, this, &StLinkFlasher::operationStarted);
     connect(&m_eraser, &StLinkEraser::operationFinished, [this](bool success, const QString &msg)
             {
+        m_connector.cleanup();
         m_flashing = false;
         emit operationFinished(success, msg); });
 

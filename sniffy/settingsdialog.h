@@ -58,6 +58,7 @@ public slots:
     void closeDialog(int isCanceled);
     void onUserLoginChanged();
     void setUpdateStatusText(const QString &text);
+    void onFirmwareOperationReady();
 
 private:
     enum class FirmwareUiOperation {
@@ -68,6 +69,7 @@ private:
 
     int m_lastStatusType = 0;
     FirmwareUiOperation m_lastFirmwareOperation = FirmwareUiOperation::None;
+    bool m_waitingForFirmwareReady = false;
 
 private slots:
     void restartWarning();
@@ -82,15 +84,13 @@ private slots:
     void onFirmwareLogMessage(const QString &message);
     void onFirmwareOperationStarted();
     void onFirmwareOperationFinished(bool success);
-    void onFirmwareFlashed();
 
 signals:
     void saveSessionRequested();
     void loadSessionRequested();
     void checkForUpdatesRequested();
-    void firmwareFlashed();
-    void massEraseRequested();
-    void massEraseCompleted();
+    void firmwareOperationRequested();
+    void firmwareOperationFinished(bool success, bool flashed);
 };
 
 #endif // SETTINGSDIALOG_H

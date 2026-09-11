@@ -303,7 +303,6 @@ SettingsDialog::SettingsDialog(Authenticator *auth, QWidget *parent) : QDialog(p
     connect(m_firmwareManager, &FirmwareManager::logMessage, this, &SettingsDialog::onFirmwareLogMessage);
     connect(m_firmwareManager, &FirmwareManager::operationStarted, this, &SettingsDialog::onFirmwareOperationStarted);
     connect(m_firmwareManager, &FirmwareManager::operationFinished, this, &SettingsDialog::onFirmwareOperationFinished);
-    connect(m_firmwareManager, &FirmwareManager::firmwareFlashed, this, &SettingsDialog::onFirmwareFlashed);
     connect(buttonsLicenses, &WidgetButtons::clicked, this, &SettingsDialog::showThirdPartyLicenses);
     connect(buttonsCheckUpdates, &WidgetButtons::clicked, this, [this](int index, int optionalEmitParam) {
         Q_UNUSED(index);
@@ -413,7 +412,7 @@ void SettingsDialog::onFlashButtonClicked(int index, int optionalEmitParam)
     Q_UNUSED(index);
     Q_UNUSED(optionalEmitParam);
 
-    if (m_firmwareManager->isFlashInProgress())
+    if (m_lastFirmwareOperation != FirmwareUiOperation::None || m_firmwareManager->isFlashInProgress())
     {
         flashLogWindow->setVisible(true);
         flashLogWindow->appendHtml(QString("<font color=\"%1\">%2</font>").arg(Graphics::palette().warning, "Flash already in progress..."));
@@ -425,7 +424,9 @@ void SettingsDialog::onFlashButtonClicked(int index, int optionalEmitParam)
     flashLogWindow->clear();
     m_lastFirmwareOperation = FirmwareUiOperation::Flash;
 
-    m_firmwareManager->startUpdateProcess();
+    m_waitingForFirmwareReady = true;
+    onFirmwareOperationStarted();
+    emit firmwareOperationRequested();
 }
 
 void SettingsDialog::onEraseButtonClicked(int index, int optionalEmitParam)
@@ -433,7 +434,7 @@ void SettingsDialog::onEraseButtonClicked(int index, int optionalEmitParam)
     Q_UNUSED(index);
     Q_UNUSED(optionalEmitParam);
 
-    if (m_firmwareManager->isFlashInProgress())
+    if (m_lastFirmwareOperation != FirmwareUiOperation::None || m_firmwareManager->isFlashInProgress())
     {
         flashLogWindow->setVisible(true);
         flashLogWindow->appendHtml(QString("<font color=\"%1\">%2</font>").arg(Graphics::palette().warning, "Operation already in progress..."));
@@ -443,8 +444,20 @@ void SettingsDialog::onEraseButtonClicked(int index, int optionalEmitParam)
     flashLogWindow->setVisible(true);
     flashLogWindow->clear();
     m_lastFirmwareOperation = FirmwareUiOperation::Erase;
-    emit massEraseRequested();
-    m_firmwareManager->startMassErase();
+    m_waitingForFirmwareReady = true;
+    onFirmwareOperationStarted();
+    emit firmwareOperationRequested();
+}
+
+void SettingsDialog::onFirmwareOperationReady()
+{
+    if (!m_waitingForFirmwareReady) return;
+    m_waitingForFirmwareReady = false;
+    if (m_lastFirmwareOperation == FirmwareUiOperation::Flash) {
+        m_firmwareManager->startUpdateProcess();
+    } else if (m_lastFirmwareOperation == FirmwareUiOperation::Erase) {
+        m_firmwareManager->startMassErase();
+    }
 }
 
 void SettingsDialog::showThirdPartyLicenses()
@@ -523,18 +536,11 @@ void SettingsDialog::onFirmwareOperationStarted()
 
 void SettingsDialog::onFirmwareOperationFinished(bool success)
 {
+    if (m_lastFirmwareOperation == FirmwareUiOperation::None) return;
+    const bool flashed = m_lastFirmwareOperation == FirmwareUiOperation::Flash;
+    m_waitingForFirmwareReady = false;
+    m_lastFirmwareOperation = FirmwareUiOperation::None;
     buttonsFlash->setEnabled(true);
     buttonsErase->setEnabled(true);
-
-    if (success && m_lastFirmwareOperation == FirmwareUiOperation::Erase)
-    {
-        emit massEraseCompleted();
-    }
-
-    m_lastFirmwareOperation = FirmwareUiOperation::None;
-}
-
-void SettingsDialog::onFirmwareFlashed()
-{
-    emit firmwareFlashed();
+    emit firmwareOperationFinished(success, flashed);
 }

@@ -76,6 +76,9 @@ QList<QSharedPointer<AbstractModule>> DeviceMediator::getModulesList()
 
 void DeviceMediator::ScanDevices()
 {
+    if (firmwareOperationPending) return;
+    hasFirmwareTarget = false;
+    reconnectFirmwareTarget = false;
     // Explicit Scan button press: never auto-connect.
     // The user wants to see the list and choose. Auto-connect is only
     // for the initial background scan at startup (default true).
@@ -86,15 +89,34 @@ void DeviceMediator::ScanDevices()
 void DeviceMediator::newDeviceList(QList<DeviceDescriptor> deviceList)
 {
     // Ignore scan results while a device is connected (or mid-auth handshake).
-    if (isConnected || waitingForTokenAck || pendingReconnectRequest != 0)
+    if (isConnected || waitingForTokenAck || pendingReconnectRequest != 0 || firmwareOperationPending)
         return;
 
     this->deviceList = deviceList;
+    if (reconnectFirmwareTarget && hasFirmwareTarget) {
+        device->updateGUIDeviceList(deviceList, false);
+        for (int index = 0; index < deviceList.size(); ++index) {
+            const DeviceDescriptor &candidate = deviceList.at(index);
+            const bool matchesTarget = firmwareTargetSerial.isEmpty()
+                ? candidate.port == firmwareTarget.port
+                : QSerialPortInfo(candidate.port).serialNumber().trimmed().compare(firmwareTargetSerial, Qt::CaseInsensitive) == 0;
+            if (matchesTarget && candidate.connType == firmwareTarget.connType) {
+                reconnectFirmwareTarget = false;
+                device->connectDevice(index);
+                return;
+            }
+        }
+        communication->close();
+        return;
+    }
     device->updateGUIDeviceList(deviceList, autoConnectOnSingleDevice);
 }
 
 void DeviceMediator::openDevice(int deviceIndex)
 {
+    if (firmwareOperationPending) return;
+    hasFirmwareTarget = false;
+    reconnectFirmwareTarget = false;
     pendingReconnectRequest = 0;
     // Remember which index is currently opened so we can reopen after login
     currentDeviceIndex = deviceIndex;
@@ -181,6 +203,11 @@ void DeviceMediator::reopenDeviceAfterLogin()
 
 void DeviceMediator::onConnectionClosed(quint64 requestId)
 {
+    if (firmwareOperationPending && pendingFirmwareCloseRequest == requestId) {
+        pendingFirmwareCloseRequest = 0;
+        emit firmwareOperationReady();
+        return;
+    }
     if (pendingReconnectRequest == 0 || pendingReconnectRequest != requestId) {
         return;
     }
@@ -190,54 +217,38 @@ void DeviceMediator::onConnectionClosed(quint64 requestId)
     }
 }
 
-void DeviceMediator::onMassEraseRequested()
+void DeviceMediator::prepareFirmwareOperation()
 {
-    if (currentDeviceIndex >= 0 && currentDeviceIndex < deviceList.size())
-    {
-        pendingMassEraseDevice = deviceList.at(currentDeviceIndex);
-        hasPendingMassEraseDevice = true;
-        StLinkConnector::setPreferredPortHint(pendingMassEraseDevice.port);
+    if (firmwareOperationPending) return;
+    firmwareOperationPending = true;
+    reconnectFirmwareTarget = false;
+    if (isConnected && currentDeviceIndex >= 0 && currentDeviceIndex < deviceList.size()) {
+        firmwareTarget = deviceList.at(currentDeviceIndex);
+        firmwareTargetSerial = QSerialPortInfo(firmwareTarget.port).serialNumber().trimmed();
+        hasFirmwareTarget = true;
     }
-    else
-    {
-        hasPendingMassEraseDevice = false;
-    }
-
+    StLinkConnector::setPreferredPortHint(hasFirmwareTarget ? firmwareTarget.port : QString(),
+                                        hasFirmwareTarget ? firmwareTargetSerial : QString());
     device->disconnectDevice();
+    pendingFirmwareCloseRequest = communication->close(false);
 }
 
-void DeviceMediator::onMassEraseCompleted()
+void DeviceMediator::finishFirmwareOperation(bool success, bool flashed)
 {
-    if (hasPendingMassEraseDevice)
-    {
-        for (int i = 0; i < deviceList.size(); ++i)
-        {
-            const DeviceDescriptor &candidate = deviceList.at(i);
-            if (candidate.connType == pendingMassEraseDevice.connType
-                && candidate.port == pendingMassEraseDevice.port)
-            {
-                deviceList.removeAt(i);
-                break;
+    if (!firmwareOperationPending) return;
+    firmwareOperationPending = false;
+    pendingFirmwareCloseRequest = 0;
+    if (success && !flashed && hasFirmwareTarget) {
+        for (int index = deviceList.size() - 1; index >= 0; --index) {
+            if (deviceList.at(index).port == firmwareTarget.port && deviceList.at(index).connType == firmwareTarget.connType) {
+                deviceList.removeAt(index);
             }
         }
     }
-
-    hasPendingMassEraseDevice = false;
-    pendingMassEraseDevice = DeviceDescriptor();
     currentDeviceIndex = -1;
     device->updateGUIDeviceList(deviceList, false);
-}
-
-void DeviceMediator::onFirmwareFlashed()
-{
-    if (isConnected && currentDeviceIndex >= 0 && currentDeviceIndex < deviceList.size())
-    {
-        reopenDeviceAfterLogin();
-        return;
-    }
-
-    close();
-    autoConnectOnSingleDevice = true;
+    autoConnectOnSingleDevice = success && flashed;
+    reconnectFirmwareTarget = success && flashed && hasFirmwareTarget;
     communication->close();
 }
 
@@ -339,11 +350,13 @@ void DeviceMediator::releaseConflictingModulesCallback(QString moduleName, int r
 
 void DeviceMediator::close()
 {
+    if (!firmwareOperationPending) hasFirmwareTarget = false;
+    reconnectFirmwareTarget = false;
     // Suppress auto-connect after manual disconnect so the background scanner
     // doesn't immediately reconnect to the device the user just left.
     autoConnectOnSingleDevice = false;
 
-    shutdownConnection(true);
+    shutdownConnection(!firmwareOperationPending);
     ShowDeviceModule();
 }
 

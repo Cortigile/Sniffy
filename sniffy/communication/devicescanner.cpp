@@ -18,6 +18,16 @@ void DeviceScanner::searchForDevices(bool isSearchEnaled)
         shouldClearList = true;
     }
     this->isSearchEnaled = isSearchEnaled;
+    pendingPauseRequest = 0;
+    ++searchGeneration;
+    searchChanged.wakeAll();
+}
+
+void DeviceScanner::pauseScanning(quint64 requestId)
+{
+    QMutexLocker locker(&searchMutex);
+    isSearchEnaled = false;
+    pendingPauseRequest = requestId;
     ++searchGeneration;
     searchChanged.wakeAll();
 }
@@ -28,6 +38,14 @@ void DeviceScanner::run()
     QList<DeviceDescriptor> tempDeviceList;
     while (isRunning) {
         while (isRunning && !isSearchEnaled) {
+            if (pendingPauseRequest != 0) {
+                const quint64 requestId = pendingPauseRequest;
+                pendingPauseRequest = 0;
+                locker.unlock();
+                emit scanningPaused(requestId);
+                locker.relock();
+                continue;
+            }
             searchChanged.wait(&searchMutex);
         }
         if (!isRunning) {

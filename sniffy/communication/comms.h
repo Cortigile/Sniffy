@@ -45,11 +45,15 @@ private slots:
     void devicesScanned(QList<DeviceDescriptor> deviceList);
 
 private:
+    void finishCloseIfReady(quint64 requestId);
     std::unique_ptr<SerialLine> serial; // owned resource
     QThread *serialThread;              // Qt parented (this)
     DeviceScanner devScanner;           // QThread subclass member
     quint64 connectionRequest = 0;
     bool restartScannerOnClose = false;
+    bool serialActivityEnabled = false;
+    quint64 serialClosedRequest = 0;
+    quint64 scannerPausedRequest = 0;
 };
 
 #endif // COMMS_H

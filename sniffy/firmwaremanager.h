@@ -48,20 +48,16 @@ private slots:
     void onFlashProgress(int value, int total);
     void onFlashLog(const QString &msg);
     void onFlashFinished(bool success, const QString &msg);
+    void onDeviceDisconnected();
     void onOperationStarted(const QString &operation);
     void onDeviceUIDAvailable(const QString &uidHex, const QString &mcu);
     void onDeviceUIDError(const QString &message);
-
-    // Auth slots
-    void onAuthStarted();
-    void onAuthFinished();
-    void onAuthFailed(const QString &code, const QString &uiMessage);
-    void onAuthSucceeded(const QDateTime &validity, const QByteArray &token);
 
     // Network slots
     void onFirmwareDownloadFinished(QNetworkReply *reply);
 
 private:
+    void finishOperation(bool success);
     void failOperation(const QString &msg, int msgType = MsgError);
     QString cachedFirmwarePath(const QString &uidHex) const;
     QString cachedFirmwareMetadataPath(const QString &uidHex) const;
@@ -74,10 +70,11 @@ private:
 
     StLinkFlasher *m_flasher;
     QThread *m_flasherThread;
-    Authenticator *m_auth;
     QNetworkAccessManager *m_networkManager;
 
     bool m_flashInProgress;
+    bool m_finishingOperation = false;
+    bool m_operationSucceeded = false;
     QString m_lastReadUidHex;
     QString m_lastReadMcu;
     FirmwareCompatibility::ReleaseManifest m_pendingManifest;

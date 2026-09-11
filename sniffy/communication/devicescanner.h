@@ -17,9 +17,11 @@ public:
     explicit DeviceScanner(QObject *parent = nullptr);
     ~DeviceScanner();
     void searchForDevices(bool isSearchEnaled);
+    void pauseScanning(quint64 requestId);
 
 signals:
     void newDevicesScanned(QList<DeviceDescriptor> deviceList);
+    void scanningPaused(quint64 requestId);
 
 
 private:
@@ -31,6 +33,7 @@ private:
     bool isRunning = true;
     bool shouldClearList = false;
     quint64 searchGeneration = 0;
+    quint64 pendingPauseRequest = 0;
     QList<DeviceDescriptor> currentDeviceList;
     SerialLine serLine;
 

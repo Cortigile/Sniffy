@@ -48,6 +48,7 @@ signals:
     void loadLayoutUponOpen(QString Devicename);
     void saveLayoutUponExit(void);
     void popupMessageRequested(const QString &message);
+    void firmwareOperationReady();
 
 private:
     void wireRemainingModules();
@@ -91,8 +92,12 @@ private:
     // (so the user isn't immediately reconnected to the device they just left).
     bool autoConnectOnSingleDevice = true;
     bool remainingModulesWired = false;
-    DeviceDescriptor pendingMassEraseDevice;
-    bool hasPendingMassEraseDevice = false;
+    bool firmwareOperationPending = false;
+    quint64 pendingFirmwareCloseRequest = 0;
+    DeviceDescriptor firmwareTarget;
+    QString firmwareTargetSerial;
+    bool hasFirmwareTarget = false;
+    bool reconnectFirmwareTarget = false;
 
 private slots:
     void parseData(QByteArray data);
@@ -111,12 +116,11 @@ private slots:
     void onDeviceSpecificationTimeout();
 
 public slots:
+    void prepareFirmwareOperation();
+    void finishFirmwareOperation(bool success, bool flashed);
     void close();
     void closeApp();
     void reopenDeviceAfterLogin();
-    void onMassEraseRequested();
-    void onMassEraseCompleted();
-    void onFirmwareFlashed();
 };
 
 #endif // DEVICE_H
