@@ -52,6 +52,10 @@ signals:
 private:
     void wireRemainingModules();
     void shutdownConnection(bool restartScanner);
+    void requestDeviceSpecification();
+    void beginTokenAuthentication();
+    void refreshDeviceToken();
+    void failDeviceOpen(const QString &message);
 
     QList<DeviceDescriptor> deviceList;
     QList<QSharedPointer<AbstractModule>> modules;
@@ -74,6 +78,10 @@ private:
     // Deterministic authentication: wait for FW token ACK before wiring modules
     bool waitingForTokenAck = false;
     QTimer *tokenAckTimer = nullptr;
+    bool waitingForDeviceSpecification = false;
+    bool waitingForAuthRecovery = false;
+    QTimer *deviceSpecificationTimer = nullptr;
+    quint64 connectionGeneration = 0;
     QString pendingDevName;      // device name saved while waiting for ACK
     int     pendingDeviceIndex = -1; // device index saved while waiting for ACK
 
@@ -98,6 +106,7 @@ private slots:
     void finalizeDeviceOpen(int deviceIndex, QString devName);
     void onConnectionOpened(bool success);
     void onTokenAckTimeout();
+    void onDeviceSpecificationTimeout();
 
 public slots:
     void close();
