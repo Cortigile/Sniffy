@@ -212,6 +212,29 @@ if(WIN32)
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/config/chips"
     )
 
+elseif(APPLE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
+    if(DEFINED ENV{SNIFFY_STLINK_LIBRARY})
+        set(STLINK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/stlink/include")
+        set(STLINK_LIB "$ENV{SNIFFY_STLINK_LIBRARY}")
+        if(NOT EXISTS "${STLINK_LIB}")
+            message(FATAL_ERROR "Pinned ST-Link library not found: ${STLINK_LIB}")
+        endif()
+    else()
+        find_library(STLINK_LIB NAMES stlink stlink-static REQUIRED)
+        find_path(STLINK_INCLUDE_DIR stlink.h PATH_SUFFIXES stlink REQUIRED)
+    endif()
+
+    message(STATUS "Found libstlink: ${STLINK_LIB}")
+    message(STATUS "Found stlink headers: ${STLINK_INCLUDE_DIR}")
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${LIBUSB_INCLUDE_DIRS}
+        ${STLINK_INCLUDE_DIR}
+    )
+    target_link_directories(${PROJECT_NAME} PRIVATE ${LIBUSB_LIBRARY_DIRS})
+    set(EXTRA_LIBS ${STLINK_LIB} ${LIBUSB_LIBRARIES})
+
 elseif(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
@@ -251,6 +274,26 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 set_target_properties(${PROJECT_NAME} PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
+
+# macOS app bundle
+if(APPLE)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.sniffy.sniffy"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${SNIFFY_DESKTOP_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${SNIFFY_DESKTOP_VERSION}"
+        MACOSX_BUNDLE_ICON_FILE "logo.icns"
+    )
+
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+        @ONLY
+    )
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+    )
+endif()
 
 # Enable unity build (can significantly reduce compile time)
 if(SNIFFY_ENABLE_UNITY)
@@ -301,6 +344,53 @@ if(WIN32)
             COMMENT "Deploying Qt dependencies using windeployqt..."
         )
     endif()
+endif()
+
+# Deploy Qt dependencies on macOS (bundle frameworks into .app)
+if(APPLE)
+    find_package(Qt6Core REQUIRED)
+    get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
+    find_program(MACDEPLOYQT_EXECUTABLE macdeployqt HINTS "${_qt_bin_dir}")
+
+    if(MACDEPLOYQT_EXECUTABLE)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND "${MACDEPLOYQT_EXECUTABLE}"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../.."
+                "-verbose=1"
+                "-no-strip"
+            COMMENT "Deploying Qt frameworks using macdeployqt..."
+        )
+    endif()
+
+    # Bundle libusb dylib into the app bundle
+    get_target_property(_sniffy_bundle_dir ${PROJECT_NAME} BUNDLE_DIR)
+    if(NOT _sniffy_bundle_dir)
+        set(_sniffy_bundle_dir "$<TARGET_FILE_DIR:${PROJECT_NAME}>/../..")
+    endif()
+    set(_frameworks_dir "${_sniffy_bundle_dir}/Contents/Frameworks")
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_frameworks_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LIBUSB_LIBRARY_DIRS}/libusb-1.0.dylib"
+            "${_frameworks_dir}/libusb-1.0.dylib"
+        COMMAND install_name_tool -id "@rpath/libusb-1.0.dylib"
+            "${_frameworks_dir}/libusb-1.0.dylib"
+        COMMAND install_name_tool -change
+            "${LIBUSB_LIBRARY_DIRS}/libusb-1.0.dylib"
+            "@rpath/libusb-1.0.dylib"
+            "$<TARGET_FILE:${PROJECT_NAME}>"
+        COMMENT "Bundling libusb-1.0.dylib into app bundle..."
+    )
+
+    # Bundle ST-Link chip definitions into the app bundle
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/libs/stlink/config/chips"
+            "${_sniffy_bundle_dir}/Contents/Resources/chips"
+        COMMENT "Bundling ST-Link chip definitions into app bundle..."
+    )
 endif()
 
 # MinGW (GNU) assembler may hit 'too many sections'; enable big-obj to raise limits
@@ -453,6 +543,10 @@ if(WIN32)
     set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/graphics/logo.ico")
     set(CPACK_WIX_PROGRAM_MENU_FOLDER "Sniffy")
 
+elseif(APPLE)
+    set(CPACK_GENERATOR "DragNDrop")
+    set(CPACK_DMG_VOLUME_NAME "Sniffy")
+    set(CPACK_DMG_FORMAT "UDBZ")
 elseif(UNIX AND NOT APPLE)
     set(CPACK_GENERATOR "DEB")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sniffy Team")
