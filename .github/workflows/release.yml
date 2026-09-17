@@ -166,7 +166,7 @@ jobs:
           git -C "$RUNNER_TEMP/stlink" remote add origin https://github.com/stlink-org/stlink.git
           git -C "$RUNNER_TEMP/stlink" fetch --depth 1 origin "$STLINK_GIT_REF"
           git -C "$RUNNER_TEMP/stlink" checkout --detach FETCH_HEAD
-          cmake -S "$RUNNER_TEMP/stlink" -B "$RUNNER_TEMP/stlink-build" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S "$RUNNER_TEMP/stlink" -B "$RUNNER_TEMP/stlink-build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTLINK_WERROR=OFF -DSTLINK_BUILD_GUI=OFF
           cmake --build "$RUNNER_TEMP/stlink-build" --target stlink-static
           echo "SNIFFY_STLINK_LIBRARY=$RUNNER_TEMP/stlink-build/lib/libstlink.a" >> "$GITHUB_ENV"
 
@@ -196,7 +196,7 @@ jobs:
           git -C "$RUNNER_TEMP/stlink" remote add origin https://github.com/stlink-org/stlink.git
           git -C "$RUNNER_TEMP/stlink" fetch --depth 1 origin "$STLINK_GIT_REF"
           git -C "$RUNNER_TEMP/stlink" checkout --detach FETCH_HEAD
-          cmake -S "$RUNNER_TEMP/stlink" -B "$RUNNER_TEMP/stlink-build" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S "$RUNNER_TEMP/stlink" -B "$RUNNER_TEMP/stlink-build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTLINK_WERROR=OFF -DSTLINK_BUILD_GUI=OFF
           cmake --build "$RUNNER_TEMP/stlink-build" --target stlink-static
           echo "SNIFFY_STLINK_LIBRARY=$RUNNER_TEMP/stlink-build/lib/libstlink.a" >> "$GITHUB_ENV"
 
