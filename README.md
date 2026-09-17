@@ -2,12 +2,15 @@
 
 Sniffy is a powerful software-defined instrument interface designed for STM32 Nucleo boards. It transforms your Nucleo board into a versatile lab instrument, allowing you to capture signals, generate waveforms, and analyze data in real-time through a modern Qt-based interface.
 
+Note: While the Sniffy software interface is open-source, full hardware integration and advanced instrument features require a licensed firmware for the Nucleo boards (Demo mode is available for testing).
+
 ## Features
 
 - **Device Detection**: Automatically detects connected STM32 Nucleo boards via ST-Link.
 - **Real-time Visualization**: High-performance charting for signal analysis.
 - **Module Support**: Configurable modules for Oscilloscope, Signal Generator, PWM, and more.
 - **Cross-Platform**: Available for Windows and Linux.
+- **Hardware Integration**: Full operational firmware for STM32 Nucleo boards available via commercial licensing (runs in restricted Demo mode by default).
 
 ## Installation
 
@@ -92,7 +95,9 @@ For updater regression tests, see [tests/README.md](tests/README.md).
 
 ## License
 
-Sniffy is licensed under the **GNU General Public License v3.0** — see [LICENSE.txt](LICENSE.txt) for details.
+Software Interface: Sniffy software is open-source and licensed under the **GNU General Public License v3.0** — see [LICENSE.txt](LICENSE.txt) for details.
+
+Firmware: The accompanying instrument firmware for STM32 Nucleo boards is proprietary / dual-licensed. A commercial firmware license is required for full, unrestricted hardware functionality beyond the free demo mode.
 
 ### Third-Party Libraries
 
