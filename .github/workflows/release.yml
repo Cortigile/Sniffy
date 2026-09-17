@@ -115,7 +115,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs: release_plan
     strategy:
-      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -124,6 +123,8 @@ jobs:
           # that are not available on older Kubuntu releases.
           - os: ubuntu-22.04
             qt_arch: linux_gcc_64
+          - os: macos-latest
+            qt_arch: clang_64
 
     steps:
       - name: Checkout repository
@@ -156,6 +157,36 @@ jobs:
 
       - name: Build ST-Link (Linux)
         if: runner.os == 'Linux'
+        shell: bash
+        env:
+          STLINK_GIT_REF: 40948aa3de78778f51af02d795327ac20fa385d3
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/stlink"
+          git -C "$RUNNER_TEMP/stlink" remote add origin https://github.com/stlink-org/stlink.git
+          git -C "$RUNNER_TEMP/stlink" fetch --depth 1 origin "$STLINK_GIT_REF"
+          git -C "$RUNNER_TEMP/stlink" checkout --detach FETCH_HEAD
+          cmake -S "$RUNNER_TEMP/stlink" -B "$RUNNER_TEMP/stlink-build" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/stlink-build" --target stlink-static
+          echo "SNIFFY_STLINK_LIBRARY=$RUNNER_TEMP/stlink-build/lib/libstlink.a" >> "$GITHUB_ENV"
+
+      - name: Install Qt (macOS)
+        if: runner.os == 'macOS'
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.8.0'
+          host: mac
+          target: 'desktop'
+          arch: ${{ matrix.qt_arch }}
+          modules: 'qtcharts qtserialport'
+
+      - name: Install macOS Dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install libusb ninja pkg-config
+
+      - name: Build ST-Link (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         env:
           STLINK_GIT_REF: 40948aa3de78778f51af02d795327ac20fa385d3
@@ -253,6 +284,7 @@ jobs:
             build/Sniffy-*.exe
             build/*.msi
             build/*.deb
+            build/*.dmg
           overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

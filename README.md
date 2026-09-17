@@ -9,8 +9,8 @@ Note: While the Sniffy software interface is open-source, full hardware integrat
 - **Device Detection**: Automatically detects connected STM32 Nucleo boards via ST-Link.
 - **Real-time Visualization**: High-performance charting for signal analysis.
 - **Module Support**: Configurable modules for Oscilloscope, Signal Generator, PWM, and more.
-- **Cross-Platform**: Available for Windows and Linux.
 - **Hardware Integration**: Full operational firmware for STM32 Nucleo boards available via commercial licensing (runs in restricted Demo mode by default).
+- **Cross-Platform**: Available for Windows, Linux, and macOS.
 
 ## Installation
 
@@ -22,6 +22,14 @@ Note: While the Sniffy software interface is open-source, full hardware integrat
 	*   The application requires ST-Link USB drivers.
 	*   If you have used your Nucleo board on this computer before (with STM32CubeIDE, Keil, etc.), the drivers are already installed.
 	*   If the device is not detected, download and install the **STSW-LINK009** driver from [ST.com](https://www.st.com/en/development-tools/stsw-link009.html).
+
+### macOS
+
+1. Download the latest disk image (`sniffy-x.x.x-Darwin.dmg`) from the [Releases](https://github.com/StartYourPath/sniffy/releases) page.
+2. Open the `.dmg` file and drag **Sniffy** to your Applications folder.
+3. **Permissions**:
+   * macOS may prompt you to allow the app to access USB devices on first launch.
+   * If the ST-Link device is not detected, ensure no other ST-Link tools (e.g., STM32CubeProgrammer) are using the device.
 
 ### Linux (Ubuntu/Debian)
 
@@ -81,6 +89,7 @@ use manual installation if automatic updates are unavailable.
 - CMake 3.21+
 - Ninja (optional, but recommended)
 - **Linux**: `libusb-1.0-0-dev`, `libstlink-dev`, `build-essential`
+- **macOS**: `libusb`, `stlink`, `ninja`, `pkg-config` (install via Homebrew)
 
 ### Build Steps
 
