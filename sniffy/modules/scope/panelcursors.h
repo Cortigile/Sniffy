@@ -16,7 +16,7 @@ class PanelCursors : public QObject
     Q_OBJECT
 public:
     explicit PanelCursors(QVBoxLayout *destination, QWidget *parent = nullptr);
-    void ValidatePanelGUI(int type);
+    void ValidatePanelGUI(int type, bool fftSelected = false);
 
 signals:
 

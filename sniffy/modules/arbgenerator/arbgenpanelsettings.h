@@ -12,6 +12,7 @@
 #include "gui/widgetbuttons.h"
 #include "gui/widgettextinput.h"
 #include "gui/widgetlabel.h"
+#include "gui/widgettab.h"
 
 #include "../labelformator.h"
 
@@ -62,6 +63,7 @@ public:
     int customLength = 0;
 
     //for each channel
+    widgetTab *channelTabs;
     WidgetSeparator *separators[MAX_ARB_CHANNELS_NUM];
     QScrollArea *verChannArea[MAX_ARB_CHANNELS_NUM];
 

@@ -508,7 +508,7 @@ void ScopeWindow::cursorTypeCallback(int index)
 {
     chart->clearAllCursors();
     chartFFT->clearAllCursors();
-    panelCursors->ValidatePanelGUI(index);
+    panelCursors->ValidatePanelGUI(index, config->FFTenabled && panelMath->mathType->getSelectedIndex() == 3);
     config->cursorsActiveIndex = index;
 
     if(index==0){
@@ -524,7 +524,7 @@ void ScopeWindow::cursorTypeCallback(int index)
 void ScopeWindow::cursorChannelCallback(int index)
 {
     config->cursorChannelIndex = index;
-    panelCursors->ValidatePanelGUI(config->cursorsActiveIndex);
+    panelCursors->ValidatePanelGUI(config->cursorsActiveIndex, config->FFTenabled && panelMath->mathType->getSelectedIndex() == 3);
     if(config->cursorsActiveIndex == 2){
         setVerticalCursors(config->cursorChannelIndex);
     }
@@ -562,9 +562,12 @@ void ScopeWindow::resolutionChangedCallback(int index){
 void ScopeWindow::updateCursorReadings()
 {
     qreal curA, curB;
+    const bool fftSelected = config->FFTenabled &&
+                             panelMath->mathType->getSelectedIndex() == 3 &&
+                             config->cursorChannelIndex == 4;
     if(config->cursorsActiveIndex == 2){
         labelInfoPanel->hideCursorReadingsHor();
-        if(config->cursorChannelIndex == 4){
+        if(fftSelected){
             curA = panelCursors->cursorFFTVerADial->getRealValue();
             curB = panelCursors->cursorFFTVerBDial->getRealValue();
             QString unit = config->FFTisLog?"dB":"Vrms";
@@ -591,7 +594,7 @@ void ScopeWindow::updateCursorReadings()
         }
     }
     if(config->cursorsActiveIndex == 1){
-        if(config->cursorChannelIndex == 4){
+        if(fftSelected){
             curA = chartFFT->getSignalValue(0,panelCursors->cursorFFTHorADial->getRealValue());
             curB = chartFFT->getSignalValue(0,panelCursors->cursorFFTHorBDial->getRealValue());
             labelInfoPanel->setCursorFFTFreqReadings(panelCursors->cursorFFTHorADial->getRealValue(),panelCursors->cursorFFTHorBDial->getRealValue());
@@ -620,7 +623,10 @@ void ScopeWindow::updateCursorReadings()
 
 void ScopeWindow::setHorizontalCursors(int channelIndex){
     qreal value;
-    if(config->FFTenabled && panelCursors->channelButtons->getSelectedIndex()==4){
+    const bool fftSelected = config->FFTenabled &&
+                             panelMath->mathType->getSelectedIndex() == 3 &&
+                             channelIndex == 4;
+    if(fftSelected){
         value = panelCursors->cursorFFTHorADial->getRealValue();
         chartFFT->setHorizontalCursor(channelIndex, value, Cursor::CURSOR_A);
         value = panelCursors->cursorFFTHorBDial->getRealValue();
@@ -652,7 +658,10 @@ void ScopeWindow::setHorizontalCursors(int channelIndex){
 
 void ScopeWindow::setVerticalCursors(int channelIndex)
 {
-    if(config->FFTenabled && panelCursors->channelButtons->getSelectedIndex()==4){
+    const bool fftSelected = config->FFTenabled &&
+                             panelMath->mathType->getSelectedIndex() == 3 &&
+                             channelIndex == 4;
+    if(fftSelected){
         chartFFT->setVerticalCursor(channelIndex,panelCursors->cursorFFTVerADial->getRealValue(),Cursor::CURSOR_A);
         chartFFT->setVerticalCursor(channelIndex,panelCursors->cursorFFTVerBDial->getRealValue(),Cursor::CURSOR_B);
         chart->clearAllCursors();

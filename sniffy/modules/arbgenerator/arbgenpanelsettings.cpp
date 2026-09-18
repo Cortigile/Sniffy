@@ -39,7 +39,7 @@ ArbGenPanelSettings::ArbGenPanelSettings(QVBoxLayout *destination, bool isPWMbas
     customLengthInput->setObjectName("arbgenmemleng");
     customLengthInput->setMaximumSize(120,50);
 
-    buttonSelectFile = new WidgetButtons(parent,1,ButtonTypes::NORMAL,"     Arbitrary data");
+    buttonSelectFile = new WidgetButtons(parent,1,ButtonTypes::NORMAL,"Arbitrary data");
     buttonSelectFile->setObjectName("buttonselectfileArbGen");
     buttonSelectFile->setText("   Select   ");
 
@@ -84,15 +84,19 @@ ArbGenPanelSettings::ArbGenPanelSettings(QVBoxLayout *destination, bool isPWMbas
     sweepControl->addWidget(dialSweepTime);
     destination->addLayout(sweepControl);
 
-    QHBoxLayout *horBox = new QHBoxLayout();
-    destination->addLayout(horBox);
+    channelTabs = new widgetTab(parent, MAX_ARB_CHANNELS_NUM);
+    channelTabs->setObjectName("arbGenChannelTabs");
+    destination->addWidget(channelTabs);
+
     for(int i = 0; i < MAX_ARB_CHANNELS_NUM; i++){
         QString chNStr = QString::number(i + 1);
+        channelTabs->setText("CH " + chNStr, i);
 
         verChannArea[i] = new QScrollArea(parent);
         verChannArea[i]->setWidgetResizable(true);
         verChannArea[i]->setMinimumWidth(150);
-        horBox->addWidget(verChannArea[i]);
+        verChannArea[i]->setFrameShape(QFrame::NoFrame);
+        channelTabs->getLayout(i)->addWidget(verChannArea[i]);
         QWidget *setScroll = new QWidget(parent);
 
         verChannArea[i]->setWidget(setScroll);
@@ -218,19 +222,11 @@ ArbGenPanelSettings::ArbGenPanelSettings(QVBoxLayout *destination, bool isPWMbas
     connect(dialFreqSweepMax,&WidgetDialRange::valueChanged,this,&ArbGenPanelSettings::sweepMaxCallback);
     connect(dialFreqSweepMin,&WidgetDialRange::valueChanged,this,&ArbGenPanelSettings::sweepMinCallback);
     connect(dialSweepTime,&WidgetDialRange::valueChanged,this,&ArbGenPanelSettings::sweepSettingsCallback);
-
-    QSpacerItem *verticalSpacerW = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
-    horBox->addItem(verticalSpacerW);
-
 }
 
 void ArbGenPanelSettings::setChannelShown(int index, bool isShown)
 {       
-    if(isShown){
-        verChannArea[index]->show();
-    }else{
-        verChannArea[index]->hide();
-    }
+    channelTabs->setTabVisible(index, isShown);
 }
 
 void ArbGenPanelSettings::restoreGUI()
