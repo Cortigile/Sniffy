@@ -108,7 +108,7 @@ PanelCursors::PanelCursors(QVBoxLayout *destination, QWidget *parent)
     destination->addItem(verticalSpacer);
 }
 
-void PanelCursors::ValidatePanelGUI(int type)
+void PanelCursors::ValidatePanelGUI(int type, bool fftSelected)
 {
     int channel = channelButtons->getSelectedIndex();
     if(type == 0){  //none
@@ -124,7 +124,7 @@ void PanelCursors::ValidatePanelGUI(int type)
 
     }else if(type == 1){  //horizontal
         channelButtons->setEnabled(true);
-        if(channelButtons->getSelectedIndex() == 4){
+        if(channelButtons->getSelectedIndex() == 4 && fftSelected){
             cursorFFTHorADial->show();
             cursorFFTHorBDial->show();
             cursorFFTHorADial->setColor(Graphics::getChannelColor(channel));
@@ -150,7 +150,7 @@ void PanelCursors::ValidatePanelGUI(int type)
         cursorHorBDial->hide();
         cursorFFTHorADial->hide();
         cursorFFTHorBDial->hide();
-        if(channelButtons->getSelectedIndex() == 4){
+        if(channelButtons->getSelectedIndex() == 4 && fftSelected){
             cursorVerADial->hide();
             cursorVerBDial->hide();
             cursorFFTVerADial->show();
