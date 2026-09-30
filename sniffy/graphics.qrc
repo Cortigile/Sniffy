@@ -106,6 +106,7 @@
         <file>config/nucleo64_template.json</file>
         <file>config/nucleo144_template.json</file>
         <file>config/Nucleo-F303RE.json</file>
+        <file>config/Nucleo-F401RE.json</file>
         <file>config/Nucleo-F446RE.json</file>
         <file>config/Nucleo-G474RE.json</file>
         <file>config/Nucleo-L476RG.json</file>
