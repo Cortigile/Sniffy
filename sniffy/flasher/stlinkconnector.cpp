@@ -218,14 +218,6 @@ bool StLinkConnector::init()
         return false;
     }
 
-    // Enter SWD mode
-    if (stlink_enter_swd_mode(m_stlink))
-    {
-        emit logMessage("Failed to enter SWD mode.");
-        cleanup();
-        return false;
-    }
-
     // Force debug
     if (stlink_force_debug(m_stlink))
     {

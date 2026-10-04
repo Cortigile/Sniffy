@@ -112,8 +112,8 @@ void StLinkEraser::massErase(stlink_t* stlink)
             if (stlink_read_debug32(stlink, STM32_FLASH_C5_OPTSR_CUR, &ob) == 0)
             {
                 info.valid = true;
-                info.rdp = static_cast<uint8_t>(ob & 0xFF);
-                info.level0 = 0xAA;
+                info.rdp = static_cast<uint8_t>((ob >> 8) & 0xFF);
+                info.level0 = 0xED;
             }
             break;
         }
