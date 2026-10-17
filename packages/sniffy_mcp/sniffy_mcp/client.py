@@ -1,7 +1,7 @@
 """Low-level client for the Sniffy AgentBridge JSON-RPC server.
 
-Connects to the ``sniffy-agent`` named pipe (or TCP fallback) and
-exposes every JSON-RPC method as a typed Python method.
+Connects to the ``sniffy-agent`` named pipe (Windows) or Unix socket
+and exposes every JSON-RPC method as a typed Python method.
 
 Usage::
 
