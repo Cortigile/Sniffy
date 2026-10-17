@@ -1,8 +1,18 @@
+<div align="center">
+<img src="assets/sniffy-logo-git.png" alt="Sniffy logo" width="320" />
+</div>
+
 # Sniffy
 
 Sniffy is a powerful software-defined instrument interface designed for STM32 Nucleo boards. It transforms your Nucleo board into a versatile lab instrument, allowing you to capture signals, generate waveforms, and analyze data in real-time through a modern Qt-based interface.
 
-Note: While the Sniffy software interface is open-source, full hardware integration and advanced instrument features require a licensed firmware for the Nucleo boards (Demo mode is available for testing).
+The official project website is [sniffylab.com](https://sniffylab.com) — registration, downloads, user manuals and more.
+
+Note: The Sniffy desktop application is open source. The firmware that runs on the Nucleo board is closed source and requires a license [free license: oscilloscope, voltmeter, arbitrary waveform generator].
+
+<div align="center">
+<img src="assets/device-welcome.png" alt="Sniffy showing a connected Nucleo board" width="900" />
+</div>
 
 ## Features
 
@@ -16,7 +26,7 @@ Note: While the Sniffy software interface is open-source, full hardware integrat
 
 ### Windows
 
-1.  Download the latest installer (`sniffy-x.x.x-win64.exe`) from the [Releases](https://github.com/StartYourPath/sniffy/releases) page.
+1.  Download the latest installer (`sniffy-x.x.x-win64.exe`) from the [Releases](https://github.com/Cortigile/sniffy/releases) page.
 2.  Run the installer and follow the on-screen instructions.
 3.  **Drivers**:
 	*   The application requires ST-Link USB drivers.
@@ -25,7 +35,7 @@ Note: While the Sniffy software interface is open-source, full hardware integrat
 
 ### Linux (Ubuntu/Debian)
 
-1.  Download the latest Debian package (`sniffy-x.x.x-Linux.deb`) from the [Releases](https://github.com/StartYourPath/sniffy/releases) page.
+1.  Download the latest Debian package (`sniffy-x.x.x-Linux.deb`) from the [Releases](https://github.com/Cortigile/sniffy/releases) page.
 2.  Install the package using `apt` or `dpkg`:
 	```bash
 	sudo apt install ./sniffy-*-Linux.deb
@@ -66,6 +76,18 @@ use manual installation if automatic updates are unavailable.
 	*   Configure parameters (Frequency, Amplitude, etc.) in the settings panel.
 	*   View real-time data on the main plot area.
 
+<div align="center">
+<img src="assets/scope-syncpwm-arbgen.png" alt="Oscilloscope capturing signals from the Sync PWM and Arbitrary Generator modules" width="900" />
+</div>
+
+## Architecture
+
+The desktop application drives the STM32 Nucleo board over a serial protocol, while an optional AI agent can control the same instrument modules through an MCP bridge.
+
+<div align="center">
+<img src="assets/system-diagram.png" alt="Sniffy system architecture" width="640" />
+</div>
+
 ## Documentation
 
 - English user manual source: [sniffy/docs/USER_MANUAL_en.md](sniffy/docs/USER_MANUAL_en.md)
@@ -85,7 +107,7 @@ use manual installation if automatic updates are unavailable.
 ### Build Steps
 
 ```bash
-git clone --recursive https://github.com/StartYourPath/sniffy.git
+git clone --recursive https://github.com/Cortigile/sniffy.git
 cd sniffy
 cmake -S sniffy -B build
 cmake --build build

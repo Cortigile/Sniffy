@@ -1,0 +1,27 @@
+flowchart TB
+    subgraph PC["PC"]
+        LLM["AI agent (LLM)"]
+        MCP["sniffy-mcp<br/>MCP server (Python)"]
+        subgraph APP["Sniffy - Qt app"]
+            direction LR
+            GUI["GUI + instrument modules<br/>scope, generator, counter, PWM, voltmeter, voltage source"]
+            BRIDGE["AgentBridge<br/>(JSON-RPC 2.0)"]
+            COMMS["Communication<br/>(serial protocol)"]
+            FLASH["Firmware manager"]
+        end
+        STLINK["ST-Link (USB)"]
+    end
+
+    subgraph HW["STM32 Nucleo board"]
+        direction LR
+        FW["Firmware<br/>(protocol + features)"]
+        PERI["Peripherals<br/>ADC, DAC, DMA, TIM, GPIO"]
+    end
+
+    LLM <-->|MCP, stdio| MCP
+    MCP <-->|named pipe sniffy-agent| BRIDGE
+    BRIDGE <--> GUI
+    GUI <--> COMMS
+    COMMS <-->|virtual COM port| STLINK
+    STLINK <-->|USART @ 921600| FW
+    FW <--> PERI
