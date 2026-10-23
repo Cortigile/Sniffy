@@ -11,6 +11,7 @@ class SyncPwmSpec : public AbstractSpecification
 public:
     explicit SyncPwmSpec(QObject *parent = nullptr);
     void parseSpecification(QByteArray spec);
+    int activeChannelCount() const;
 
     int max_freq;
     int chan_num;

@@ -36,6 +36,7 @@ public:
     void connectDependentChannels();
     void disconnectDependentChannels();
     void setSpecification(SyncPwmSpec *spec);
+    int activeChannelCount() const;
     void restoreGUIAfterStartup();
     void setStartTxt();
     void setStopTxt();
@@ -55,9 +56,12 @@ private slots:
 private:
     Ui::SyncPwmWindow *ui;
     SyncPwmConfig *config;
-    SyncPwmSpec *spec;
+    SyncPwmSpec *spec = nullptr;
 
     widgetChart *chart;
+    int channelCount = CHANNELS_NUM;
+
+    bool hasValidDependentChannels() const;
 };
 
 #endif // SYNCPWMWINDOW_H

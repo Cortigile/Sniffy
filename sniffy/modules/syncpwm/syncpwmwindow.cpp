@@ -61,28 +61,48 @@ SyncPwmWindow::SyncPwmWindow(SyncPwmConfig *config, QWidget *parent) :
 }
 
 void SyncPwmWindow::connectDependentChannels(){
+    if(!hasValidDependentChannels())
+        return;
+
     connect(settings->dialFreqCh[spec->drive_chx], &WidgetDialRange::valueChanged, this, &SyncPwmWindow::dialFreqCallback);
     connect(settings->dialFreqCh[spec->drive_chy], &WidgetDialRange::valueChanged, this, &SyncPwmWindow::dialFreqCallback);
 }
 
 void SyncPwmWindow::disconnectDependentChannels(){
+    if(!hasValidDependentChannels())
+        return;
+
     disconnect(settings->dialFreqCh[spec->drive_chx], &WidgetDialRange::valueChanged, this, &SyncPwmWindow::dialFreqCallback);
     disconnect(settings->dialFreqCh[spec->drive_chy], &WidgetDialRange::valueChanged, this, &SyncPwmWindow::dialFreqCallback);
 }
 
 void SyncPwmWindow::setSpecification(SyncPwmSpec *spec){
     this->spec = spec;
+    channelCount = spec->activeChannelCount();
     settings->setSpecification(spec);
+    painter->setActiveChannelCount(channelCount);
 
-    if(spec->chans_depend){
+    if(hasValidDependentChannels()){
         connectDependentChannels();
         settings->greyOutComplementChanFreqDials(spec->driven_chx);
         settings->greyOutComplementChanFreqDials(spec->driven_chy);
     }
 
-    for(int i = 0; i < CHANNELS_NUM; i++){
+    for(int i = 0; i < channelCount; i++){
         settings->separator[i]->setText("Channel " + QString::number(i+1) + " | " + spec->pinsList[i]);
     }
+}
+
+int SyncPwmWindow::activeChannelCount() const{
+    return channelCount;
+}
+
+bool SyncPwmWindow::hasValidDependentChannels() const{
+    return spec && spec->chans_depend
+        && spec->drive_chx >= 0 && spec->drive_chx < channelCount
+        && spec->drive_chy >= 0 && spec->drive_chy < channelCount
+        && spec->driven_chx >= 0 && spec->driven_chx < channelCount
+        && spec->driven_chy >= 0 && spec->driven_chy < channelCount;
 }
 
 void SyncPwmWindow::restoreGUIAfterStartup(){

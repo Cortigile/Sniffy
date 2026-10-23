@@ -39,23 +39,26 @@ SyncPwmSettings::SyncPwmSettings(QVBoxLayout *destination, SyncPwmConfig *config
     if(config->layout == Layout::HORIZONTAL){
         for(int i = 0; i < CHANNELS_NUM; i++){
             QString chNStr = QString::number(i+1);
-
-            separator[i] = new WidgetSeparator(parent, "Channel " + chNStr);
-            spacer = new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum);
-            destination->addWidget(separator[i]);
+            channelPanels[i] = new QWidget(parent);
+            QVBoxLayout *channelLayout = new QVBoxLayout(channelPanels[i]);
+            channelLayout->setContentsMargins(0, 0, 0, 0);
+            channelLayout->setSpacing(1);
+            separator[i] = new WidgetSeparator(channelPanels[i], "Channel " + chNStr);
+            channelLayout->addWidget(separator[i]);
             QHBoxLayout *horBoxButtons = new QHBoxLayout();
             QHBoxLayout *horBoxDials = new QHBoxLayout();
-            destination->addLayout(horBoxButtons);
-            destination->addLayout(horBoxDials);
+            channelLayout->addLayout(horBoxButtons);
+            channelLayout->addLayout(horBoxDials);
 
-            configControlElements(parent, i, phase);
+            configControlElements(channelPanels[i], i, phase);
 
             horBoxButtons->addWidget(onOffCh[i]);
-            horBoxButtons->addItem(spacer);
+            horBoxButtons->addStretch();
             horBoxButtons->addWidget(inverCh[i]);
             horBoxDials->addWidget(dialFreqCh[i]);
             horBoxDials->addWidget(dialDutyCh[i]);
             horBoxDials->addWidget(dialPhaseCh[i]);
+            destination->addWidget(channelPanels[i]);
 
             phase += PI_HALF;
         }
@@ -69,13 +72,14 @@ SyncPwmSettings::SyncPwmSettings(QVBoxLayout *destination, SyncPwmConfig *config
 
         for(int i = 0; i < CHANNELS_NUM; i++){
             QString chNStr = QString::number(i+1);
+            channelPanels[i] = new QWidget(parent);
+            QVBoxLayout *verChanBox = new QVBoxLayout(channelPanels[i]);
+            verChanBox->setContentsMargins(0, 0, 0, 0);
+            separator[i] = new WidgetSeparator(channelPanels[i], "Channel " + chNStr);
 
-            QVBoxLayout *verChanBox = new QVBoxLayout();
-            separator[i] = new WidgetSeparator(parent, "Channel " + chNStr);
+            configControlElements(channelPanels[i], i, phase);
 
-            configControlElements(parent, i, phase);
-
-            horBox->addLayout(verChanBox);
+            horBox->addWidget(channelPanels[i]);
             verChanBox->addWidget(separator[i]);
             verChanBox->addWidget(onOffCh[i]);
             verChanBox->addWidget(inverCh[i]);
@@ -90,6 +94,13 @@ SyncPwmSettings::SyncPwmSettings(QVBoxLayout *destination, SyncPwmConfig *config
 
 void SyncPwmSettings::setSpecification(SyncPwmSpec *spec){
     this->spec = spec;
+    setActiveChannelCount(spec->activeChannelCount());
+}
+
+void SyncPwmSettings::setActiveChannelCount(int count){
+    const int activeCount = qBound(1, count, CHANNELS_NUM);
+    for(int i = 0; i < CHANNELS_NUM; i++)
+        channelPanels[i]->setVisible(i < activeCount);
 }
 
 void SyncPwmSettings::configControlElements(QWidget *parent, int i, int phase){

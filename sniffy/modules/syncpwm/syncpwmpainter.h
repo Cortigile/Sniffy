@@ -16,12 +16,14 @@ public:
 
     void repaint();
     void enableChannel(bool enable, int chanIndex);
+    void setActiveChannelCount(int count);
 
 private:
     SyncPwmConfig *config;
     widgetChart *chart;
     QVector<QVector<QPointF>> *points;
     qreal freq;
+    int channelCount = CHANNELS_NUM;
 
     qreal setTimeScale();
     void configDefaultChart();

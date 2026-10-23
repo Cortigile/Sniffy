@@ -1,5 +1,6 @@
 #include "syncpwmspec.h"
 #include "modules/specutils.h"
+#include "syncpwmdefs.h"
 
 SyncPwmSpec::SyncPwmSpec(QObject *parent)
 {
@@ -23,4 +24,8 @@ void SyncPwmSpec::parseSpecification(QByteArray spec){
     quint32 gpioA = 0, gpioB = 0, gpioC = 0, gpioD = 0;
     stream >> gpioA >> gpioB >> gpioC >> gpioD;
     setGpioMasks(gpioA, gpioB, gpioC, gpioD);
+}
+
+int SyncPwmSpec::activeChannelCount() const{
+    return qBound(1, chan_num, CHANNELS_NUM);
 }
