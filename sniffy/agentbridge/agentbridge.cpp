@@ -129,6 +129,25 @@ static QJsonArray serializeVoltmeterReadings(Voltmeter *vm)
     return readings;
 }
 
+static QJsonArray serializeLogicalVoltmeterReadings(Voltmeter *vm)
+{
+    QJsonArray readings;
+    for (int i = 0; i < vm->logicalChannelCount(); ++i) {
+        const ChannelData &channel = vm->logicalChannelData(i);
+        QJsonObject reading;
+        reading[QStringLiteral("slot")] = vm->logicalChannelSlot(i) + 1;
+        reading[QStringLiteral("input")] = vm->logicalChannelName(i);
+        reading[QStringLiteral("voltage")] = channel.voltage;
+        reading[QStringLiteral("min")] = channel.min;
+        reading[QStringLiteral("max")] = channel.max;
+        reading[QStringLiteral("ripple")] = channel.ripple;
+        reading[QStringLiteral("frequency")] = channel.frequency;
+        reading[QStringLiteral("percent")] = channel.percent;
+        readings.append(reading);
+    }
+    return readings;
+}
+
 static QJsonObject buildModuleState(QWidget *widget, const QString &moduleName, AbstractModule *mod = nullptr)
 {
     QJsonObject st;
@@ -410,6 +429,14 @@ static QJsonObject buildModuleState(QWidget *widget, const QString &moduleName, 
         auto *avg  = widget->findChild<WidgetDialRange *>(QStringLiteral("voltAvgSamples"));
         auto *calc = widget->findChild<WidgetButtons *>(QStringLiteral("buttonscalc"));
         auto *chEn = widget->findChild<WidgetButtons *>(QStringLiteral("ChannelvoltmeterEnable"));
+        auto *acquisitionMode = widget->findChild<WidgetButtons *>(QStringLiteral("voltmeterAcquisitionMode"));
+        if (acquisitionMode) {
+            const int modeIndex = acquisitionMode->getSelectedIndex();
+            st[QStringLiteral("acquisition_mode")] = modeIndex;
+            st[QStringLiteral("acquisition_mode_name")] = modeIndex == 1
+                                                               ? QStringLiteral("multimode")
+                                                               : QStringLiteral("normal");
+        }
         if (mode) {
             int mi = mode->getSelectedIndex();
             st[QStringLiteral("mode")] = mi;
@@ -433,6 +460,7 @@ static QJsonObject buildModuleState(QWidget *widget, const QString &moduleName, 
                 st[QStringLiteral("vdd")] = vm->getVdd();
                 st[QStringLiteral("num_channels_enabled")] = vm->getNumChannelsEnabled();
                 st[QStringLiteral("readings")] = serializeVoltmeterReadings(vm);
+                st[QStringLiteral("logical_readings")] = serializeLogicalVoltmeterReadings(vm);
             }
         }
         return st;
@@ -892,6 +920,20 @@ void AgentBridge::registerHandlers()
                 for (int i = 0; i < s->maxADCChannels && i < MAX_VOLTMETER_CHANNELS; ++i)
                     pins.append(s->channelPins[i]);
                 obj[QStringLiteral("pins")] = pins;
+                if (s->inputCapabilitiesAvailable) {
+                    QJsonArray availableInputs;
+                    for (int slot = 0; slot < s->availableInputSlots; ++slot) {
+                        QJsonObject slotInputs;
+                        slotInputs[QStringLiteral("slot")] = slot + 1;
+                        slotInputs[QStringLiteral("selected_index")] = s->currentInputSelectors[slot];
+                        QJsonArray names;
+                        for (const QString &name : s->availableInputs[slot])
+                            names.append(name);
+                        slotInputs[QStringLiteral("inputs")] = names;
+                        availableInputs.append(slotInputs);
+                    }
+                    obj[QStringLiteral("available_inputs")] = availableInputs;
+                }
             } else if (auto *s = dynamic_cast<SyncPwmSpec *>(baseSpec)) {
                 obj[QStringLiteral("channels")]      = s->chan_num;
                 obj[QStringLiteral("max_freq")]      = s->max_freq;
@@ -2159,7 +2201,10 @@ void AgentBridge::registerHandlers()
         if (!mod) return QJsonObject{{QStringLiteral("error"), QStringLiteral("Module not found")}, {QStringLiteral("code"), -32602}};
         auto *vm = qobject_cast<Voltmeter *>(mod.data());
         if (!vm) return QJsonObject{{QStringLiteral("error"), QStringLiteral("Not a Voltmeter module")}, {QStringLiteral("code"), -32602}};
-        return QJsonObject{{QStringLiteral("ok"), true}, {QStringLiteral("vdd"), vm->getVdd()}, {QStringLiteral("readings"), serializeVoltmeterReadings(vm)}};
+        return QJsonObject{{QStringLiteral("ok"), true},
+                   {QStringLiteral("vdd"), vm->getVdd()},
+                   {QStringLiteral("readings"), serializeVoltmeterReadings(vm)},
+                   {QStringLiteral("logical_readings"), serializeLogicalVoltmeterReadings(vm)}};
     };
 
     // voltmeter_set_datalog_file — set data log file path (no GUI dialog)

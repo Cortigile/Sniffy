@@ -29,6 +29,8 @@ public:
     int numberOfChannels = 1;
 
     QString datalogFileName;
+    QStringList selectedInputNames[MAX_VOLTMETER_CHANNELS];
+    bool hasSavedInputSelections = false;
 
     int targetDataLength = 200;
     VoltmeterMode mode;

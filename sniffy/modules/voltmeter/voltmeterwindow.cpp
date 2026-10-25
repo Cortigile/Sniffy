@@ -1,5 +1,16 @@
 #include "voltmeterwindow.h"
 #include "ui_voltmeterwindow.h"
+#include <QGridLayout>
+#include <QSet>
+#include <limits>
+
+namespace {
+bool isInternalAdcInput(const QString &name)
+{
+    static const QSet<QString> internalSources = {"temp", "temperature", "vref", "vbat"};
+    return internalSources.contains(name.trimmed().toLower());
+}
+}
 
 VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
     QWidget(parent),
@@ -39,11 +50,59 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
         index++;
     }
 
+    consolidatedView = new QWidget(ui->widget_module);
+    QVBoxLayout *consolidatedLayout = new QVBoxLayout(consolidatedView);
+    consolidatedLayout->setContentsMargins(5, 5, 5, 5);
+    consolidatedLayout->setSpacing(5);
+    QGridLayout *valueLayout = new QGridLayout;
+    valueLayout->setContentsMargins(0, 0, 0, 0);
+    for (int i = 0; i < MAX_VOLTMETER_LOGICAL_INPUTS; i++) {
+        const int slot = i / MAX_VOLTMETER_INPUTS_PER_SLOT;
+        WidgetLabel *valueLabel = new WidgetLabel(consolidatedView,
+                                                  "CH" + QString::number(slot + 1), "-- V");
+        valueLabel->setColor(Graphics::getChannelColor(slot));
+        consolidatedValueLabels.append(valueLabel);
+        valueLabel->hide();
+        valueLayout->addWidget(valueLabel, i / 4, i % 4);
+        consolidatedHistory.append(QVector<QPointF>());
+        consolidatedTraceVisible.append(false);
+    }
+    consolidatedLayout->addLayout(valueLayout);
+
+    consolidatedChart = new widgetChart(consolidatedView, MAX_VOLTMETER_LOGICAL_INPUTS);
+    consolidatedChart->setLabelsSize(8);
+    consolidatedChart->formatLabels("%.0f", "%.3g");
+    consolidatedChart->setGridDensity(5, 5);
+    consolidatedChart->setLabelsVisible(true, true);
+    consolidatedChart->setMargins(0, 0, 0, 0);
+    consolidatedChart->setRange(0, HISTORY_SIZE, 0, 3.3);
+    consolidatedChart->setDataMinMax(0, HISTORY_SIZE);
+    for (int i = 0; i < MAX_VOLTMETER_LOGICAL_INPUTS; i++) {
+        const int slot = i / MAX_VOLTMETER_INPUTS_PER_SLOT;
+        const int input = i % MAX_VOLTMETER_INPUTS_PER_SLOT;
+        const QColor color = input == 0 ? QColor(Graphics::getChannelColor(slot))
+                                        : QColor::fromHsv((slot * 83 + input * 31) % 360, 190, 230);
+        consolidatedChart->setTraceColor(i, color);
+    }
+    consolidatedLayout->addWidget(consolidatedChart, 1);
+    ui->verticalLayout_display->addWidget(consolidatedView, 1);
+    consolidatedView->hide();
+
     //setup control
     tabs = new widgetTab(ui->widget_settings, 2);
     tabs->setText("Control", 0);
     tabs->setText("Data log", 1);
     ui->verticalLayout_settings->addWidget(tabs);
+
+    WidgetSeparator *separatorSampling = new WidgetSeparator(this, "Mode");
+    tabs->getLayout(0)->addWidget(separatorSampling);
+
+    buttonsAcquisitionMode = new WidgetButtons(this, 2, ButtonTypes::RADIO, "Sampling");
+    buttonsAcquisitionMode->setObjectName("voltmeterAcquisitionMode");
+    tabs->getLayout(0)->addWidget(buttonsAcquisitionMode);
+    buttonsAcquisitionMode->setText("Normal", 0);
+    buttonsAcquisitionMode->setText("Multimode", 1);
+    buttonsAcquisitionMode->setDisabledButton(true, 1);
 
     WidgetSeparator *separatorChannelEnable = new WidgetSeparator(this,"Channel enable");
     tabs->getLayout(0)->addWidget(separatorChannelEnable);
@@ -56,6 +115,16 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
         buttonsChannelEnable->setColor(Graphics::getChannelColor(i),i);
         buttonsChannelEnable->setButtonHidden(true,i);
     }
+
+    multimodeSelectionWidget = new QWidget(tabs);
+    multimodeSelectionLayout = new QVBoxLayout(multimodeSelectionWidget);
+    multimodeSelectionLayout->setContentsMargins(0, 0, 0, 0);
+    multimodeSelectionLayout->setSpacing(3);
+    multimodeSelectionWidget->hide();
+    tabs->getLayout(0)->addWidget(multimodeSelectionWidget);
+
+    WidgetSeparator *separatorAcquisition = new WidgetSeparator(this,"Acquisition");
+    tabs->getLayout(0)->addWidget(separatorAcquisition);
 
     buttonsMode = new WidgetButtons(this,2,ButtonTypes::RADIO,"Speed");
     buttonsMode->setObjectName("ChannelVoltmode");
@@ -79,7 +148,7 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
     labelProgress = new WidgetLabel(this,"Progress","-/-");
     tabs->getLayout(0)->addWidget(labelProgress);
 
-    WidgetSeparator *separatorSet = new WidgetSeparator(this,"Display");
+    WidgetSeparator *separatorSet = new WidgetSeparator(this,"Measure");
     tabs->getLayout(0)->addWidget(separatorSet);
 
     buttonsCalc = new WidgetButtons(this,3,ButtonTypes::RADIO,"",2);
@@ -89,6 +158,15 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
     buttonsCalc->setText("Ripple",1);
     buttonsCalc->setText("None",2);
     buttonsCalc->setColor(Graphics::palette().unused,2);
+
+    WidgetSeparator *separatorDisplay = new WidgetSeparator(this, "Display");
+    tabs->getLayout(0)->addWidget(separatorDisplay);
+
+    buttonsView = new WidgetButtons(this, 2, ButtonTypes::RADIO, "");
+    buttonsView->setObjectName("buttonView");
+    tabs->getLayout(0)->addWidget(buttonsView);
+    buttonsView->setText("Separated", 0);
+    buttonsView->setText("Consolidated", 1);
 
     // Separator at the end is very important otherwise controls would not be nicely shown when maximized
     QSpacerItem *verticalSpacer;
@@ -120,8 +198,10 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
     tabs->getLayout(1)->addItem(verticalSpacerLog);
 
     connect(buttonsChannelEnable,&WidgetButtons::statusChanged,this,&VoltmeterWindow::channelEnableCallback);
+    connect(buttonsAcquisitionMode,&WidgetButtons::clicked,this,&VoltmeterWindow::acquisitionModeCallback);
     connect(dialAveraging,&WidgetDialRange::valueChanged,this,&VoltmeterWindow::averagingCallback);
     connect(buttonsCalc,&WidgetButtons::statusChanged,this,&VoltmeterWindow::buttonsCalcsCallback);
+    connect(buttonsView,&WidgetButtons::clicked,this,&VoltmeterWindow::viewCallback);
     connect(buttonSelectFile,&WidgetButtons::clicked,this,&VoltmeterWindow::selectFileCallback);
     connect(buttonStartLog,&WidgetButtons::clicked,this,&VoltmeterWindow::datalogCallback);
     connect(buttonsMode,&WidgetButtons::clicked,this,&VoltmeterWindow::modeCallback);
@@ -138,6 +218,7 @@ void VoltmeterWindow::restoreGUIAfterStartup()
     channelEnableCallback(buttonsChannelEnable->getStatus());
     averagingCallback(dialAveraging->getRealValue());
     modeCallback(buttonsMode->getSelectedIndex());
+    acquisitionModeCallback(buttonsAcquisitionMode->getSelectedIndex());
     showEmptyCalcs();
     //buttonStartLog->setChecked(true,1);
     //TODO GUI is loaded to previous state
@@ -147,10 +228,199 @@ void VoltmeterWindow::restoreGUIAfterStartup()
 
 int VoltmeterWindow::enabledChannelMask() const
 {
+    if (isMultimode()) {
+        int mask = 0;
+        for (int slot = 0; slot < availableInputSlots; ++slot) {
+            if (!selectedInputIndices(slot).isEmpty())
+                mask |= (1 << slot);
+        }
+        return mask;
+    }
     return buttonsChannelEnable ? buttonsChannelEnable->getStatus() : 0;
 }
 
+bool VoltmeterWindow::isMultimode() const
+{
+    return buttonsAcquisitionMode && buttonsAcquisitionMode->getSelectedIndex() == 1;
+}
+
+void VoltmeterWindow::setInputCapabilities(const QStringList inputs[], const int selectors[], int numSlots)
+{
+    availableInputs.clear();
+    availableInputSelectors.clear();
+    inputButtonRows.clear();
+    inputButtonSelectorRows.clear();
+    availableInputs.resize(MAX_VOLTMETER_CHANNELS);
+    availableInputSelectors.resize(MAX_VOLTMETER_CHANNELS);
+    inputButtonRows.resize(MAX_VOLTMETER_CHANNELS);
+    inputButtonSelectorRows.resize(MAX_VOLTMETER_CHANNELS);
+    availableInputSlots = qBound(0, numSlots, MAX_VOLTMETER_CHANNELS);
+
+    while (QLayoutItem *item = multimodeSelectionLayout->takeAt(0)) {
+        if (item->widget())
+            item->widget()->deleteLater();
+        delete item;
+    }
+
+    for (int slot = 0; slot < availableInputSlots; ++slot) {
+        for (int selector = 0; selector < inputs[slot].size(); ++selector) {
+            const QString &input = inputs[slot].at(selector);
+            if (!isInternalAdcInput(input))
+                availableInputs[slot].append(input);
+            if (!isInternalAdcInput(input))
+                availableInputSelectors[slot].append(selector);
+        }
+        if (availableInputs[slot].isEmpty())
+            continue;
+
+        WidgetSeparator *slotLabel = new WidgetSeparator(multimodeSelectionWidget,
+                                                           "CH" + QString::number(slot + 1));
+        multimodeSelectionLayout->addWidget(slotLabel);
+
+        const int numberOfRows = (availableInputs[slot].size() + 7) / 8;
+        const int baseButtonsPerRow = availableInputs[slot].size() / numberOfRows;
+        const int longerRows = availableInputs[slot].size() % numberOfRows;
+        int firstInput = 0;
+        for (int rowIndex = 0; rowIndex < numberOfRows; ++rowIndex) {
+            const int buttonsInRow = baseButtonsPerRow + (rowIndex < longerRows ? 1 : 0);
+            WidgetButtons *row = new WidgetButtons(multimodeSelectionWidget, buttonsInRow,
+                                                    ButtonTypes::CHECKABLE);
+            row->setObjectName("voltmeterInputs_CH" + QString::number(slot + 1) +
+                               "_row" + QString::number(rowIndex));
+            for (int buttonIndex = 0; buttonIndex < buttonsInRow; ++buttonIndex) {
+                const int inputIndex = firstInput + buttonIndex;
+                row->setText(availableInputs[slot].at(inputIndex), buttonIndex);
+                row->setColor(Graphics::getChannelColor(slot), buttonIndex);
+                const QStringList &savedNames = config->selectedInputNames[slot];
+                const bool restoreSaved = config->hasSavedInputSelections;
+                const bool shouldSelect = restoreSaved
+                                              ? savedNames.contains(availableInputs[slot].at(inputIndex))
+                                              : availableInputs[slot].at(inputIndex) == inputs[slot].value(selectors[slot]);
+                if (shouldSelect && selectedInputIndices(slot).size() < MAX_VOLTMETER_INPUTS_PER_SLOT)
+                    row->setChecked(true, buttonIndex);
+            }
+            inputButtonRows[slot].append(row);
+            QList<int> selectorRow;
+            for (int buttonIndex = 0; buttonIndex < buttonsInRow; ++buttonIndex)
+                selectorRow.append(availableInputSelectors[slot].at(firstInput + buttonIndex));
+            inputButtonSelectorRows[slot].append(selectorRow);
+            multimodeSelectionLayout->addWidget(row);
+            firstInput += buttonsInRow;
+            connect(row, &WidgetButtons::clicked, this,
+                    [this, slot, row](int buttonIndex) {
+                if (selectedInputIndices(slot).size() > MAX_VOLTMETER_INPUTS_PER_SLOT)
+                    row->setChecked(false, buttonIndex);
+                inputSelectionCallback();
+            });
+        }
+    }
+
+    hasSelectableInput = false;
+    for (const QStringList &slotInputs : availableInputs)
+        hasSelectableInput = hasSelectableInput || !slotInputs.isEmpty();
+    buttonsAcquisitionMode->setDisabledButton(!hasSelectableInput, 1);
+    inputSelectionCallback();
+}
+
+QList<int> VoltmeterWindow::selectedInputIndices(int slot) const
+{
+    QList<int> selected;
+    if (slot < 0 || slot >= inputButtonRows.size())
+        return selected;
+
+    for (int rowIndex = 0; rowIndex < inputButtonRows.at(slot).size(); ++rowIndex) {
+        WidgetButtons *row = inputButtonRows.at(slot).at(rowIndex);
+        for (int buttonIndex = 0; buttonIndex < 8; ++buttonIndex) {
+                if (row->isChecked(buttonIndex))
+                    selected.append(inputButtonSelectorRows.at(slot).at(rowIndex).at(buttonIndex));
+        }
+    }
+    return selected;
+}
+
+QStringList VoltmeterWindow::selectedInputNames(int slot) const
+{
+    QStringList names;
+    if (slot < 0 || slot >= availableInputSelectors.size())
+        return names;
+    for (int selector : selectedInputIndices(slot)) {
+        const int displayIndex = availableInputSelectors.at(slot).indexOf(selector);
+        if (displayIndex >= 0 && displayIndex < availableInputs.at(slot).size())
+            names.append(availableInputs.at(slot).at(displayIndex));
+    }
+    return names;
+}
+
+void VoltmeterWindow::inputSelectionCallback()
+{
+    for (int slot = 0; slot < MAX_VOLTMETER_CHANNELS; ++slot)
+        config->selectedInputNames[slot] = selectedInputNames(slot);
+
+    const int channelMask = enabledChannelMask();
+    if (isMultimode() && channelMask == 0 && availableInputSlots > 0) {
+        for (int slot = 0; slot < availableInputSlots; ++slot) {
+            if (!inputButtonRows.at(slot).isEmpty()) {
+                inputButtonRows[slot].first()->setChecked(true, 0);
+                config->selectedInputNames[slot] = selectedInputNames(slot);
+                break;
+            }
+        }
+    }
+    int enabledCount = 0;
+    for (int logicalIndex = 0; logicalIndex < MAX_VOLTMETER_LOGICAL_INPUTS; ++logicalIndex) {
+        bool selected = false;
+        const int slot = logicalIndex / MAX_VOLTMETER_INPUTS_PER_SLOT;
+        const int inputOrdinal = logicalIndex % MAX_VOLTMETER_INPUTS_PER_SLOT;
+        const QList<int> selectedIndices = selectedInputIndices(slot);
+        selected = inputOrdinal < selectedIndices.size();
+        if (isMultimode()) {
+            consolidatedValueLabels.at(logicalIndex)->setVisible(selected);
+            if (!selected)
+                consolidatedTraceVisible[logicalIndex] = false;
+        }
+    }
+    for (int slot = 0; slot < MAX_VOLTMETER_CHANNELS; ++slot) {
+        if (channelMask & (1 << slot))
+            enabledCount = slot + 1;
+        if (slot < consolidatedValueLabels.size())
+            consolidatedValueLabels.at(slot)->setVisible(isMultimode() && (channelMask & (1 << slot)));
+    }
+    updateConsolidatedChart();
+    emit numChannelsEnabledChanged(enabledCount);
+    emit inputSelectionChanged();
+}
+
+void VoltmeterWindow::acquisitionModeCallback(int index)
+{
+    const bool multimode = index == 1;
+    if (multimode && !wasMultimode) {
+        const int selectedView = buttonsView->getSelectedIndex();
+        if (selectedView >= 0)
+            previousViewIndex = selectedView;
+    }
+    wasMultimode = multimode;
+
+    multimodeSelectionWidget->setVisible(multimode);
+    buttonsChannelEnable->setVisible(!multimode);
+    for (int slot = 0; slot < MAX_VOLTMETER_CHANNELS; ++slot) {
+        displays.at(slot)->setVisible(!multimode && (buttonsChannelEnable->getStatus() & (1 << slot)));
+    }
+
+    if (multimode) {
+        buttonsView->setChecked(true, 1);
+        buttonsView->hide();
+        consolidatedView->show();
+    } else {
+        buttonsView->show();
+        buttonsView->setChecked(true, previousViewIndex);
+        viewCallback(previousViewIndex);
+    }
+    emit acquisitionModeChanged(index);
+    inputSelectionCallback();
+}
+
 void VoltmeterWindow::showData(ChannelData data[], int numChannels){
+    consolidatedSampleTime += 1;
     for(int i = 0;i<numChannels;i++){
         displays.at(i)->displayString(displays.at(i)->formatNumber(data[i].voltage,'f',4));
         displays.at(i)->appendNewHistorySample("",data[i].voltage , "V", 1);
@@ -184,9 +454,80 @@ void VoltmeterWindow::showData(ChannelData data[], int numChannels){
             displays.at(i)->displayTerrString("");
         }
     }
+    const int channelMask = enabledChannelMask();
+    for (int i = 0; i < MAX_VOLTMETER_CHANNELS; i++) {
+        const bool channelEnabled = (channelMask & (1 << i)) != 0;
+        const bool hasData = i < numChannels;
+        consolidatedValueLabels.at(i)->setVisible(channelEnabled);
+        if (channelEnabled && hasData) {
+            consolidatedValueLabels.at(i)->setValue(
+                displays.at(i)->formatNumber(data[i].voltage, 'f', 4) + " V");
+            consolidatedHistory[i].append(QPointF(consolidatedSampleTime, data[i].voltage));
+            if (consolidatedHistory[i].size() > HISTORY_SIZE)
+                consolidatedHistory[i].removeFirst();
+            consolidatedTraceVisible[i] = true;
+        }
+    }
+    if (!isMultimode()) {
+        for (int i = MAX_VOLTMETER_CHANNELS; i < MAX_VOLTMETER_LOGICAL_INPUTS; ++i) {
+            consolidatedValueLabels.at(i)->hide();
+            consolidatedTraceVisible[i] = false;
+        }
+    }
+    updateConsolidatedChart();
     if(isDataLogRunning){
         appendDatalog(data, numChannels);
     }
+}
+
+void VoltmeterWindow::showLogicalReading(int logicalIndex, const ChannelData &data,
+                                         int slot, const QString &inputName, bool advanceTime)
+{
+    if (logicalIndex < 0 || logicalIndex >= MAX_VOLTMETER_LOGICAL_INPUTS)
+        return;
+    if (advanceTime)
+        consolidatedSampleTime += 1;
+
+    const int inputOffset = logicalIndex % MAX_VOLTMETER_INPUTS_PER_SLOT;
+    const QColor color = inputOffset == 0 ? QColor(Graphics::getChannelColor(slot))
+                                          : QColor::fromHsv((slot * 83 + inputOffset * 31) % 360, 190, 230);
+    WidgetLabel *label = consolidatedValueLabels.at(logicalIndex);
+    label->setName("CH" + QString::number(slot + 1) + " " + inputName);
+    label->setValue(QLocale().toString(data.voltage, 'f', 4) + " V");
+    label->setColor(color.name());
+    label->show();
+
+    consolidatedHistory[logicalIndex].append(QPointF(consolidatedSampleTime, data.voltage));
+    if (consolidatedHistory[logicalIndex].size() > HISTORY_SIZE)
+        consolidatedHistory[logicalIndex].removeFirst();
+    consolidatedTraceVisible[logicalIndex] = true;
+    consolidatedChart->setTraceColor(logicalIndex, color);
+    updateConsolidatedChart();
+}
+
+void VoltmeterWindow::setLogicalInputs(const QStringList &keys, const QStringList &labels)
+{
+    QHash<QString, QVector<QPointF>> previousHistory;
+    QHash<QString, bool> previousVisibility;
+    for (int i = 0; i < logicalInputKeys.size(); ++i) {
+        previousHistory.insert(logicalInputKeys.at(i), consolidatedHistory.at(i));
+        previousVisibility.insert(logicalInputKeys.at(i), consolidatedTraceVisible.at(i));
+    }
+
+    logicalInputKeys = keys;
+    for (int i = 0; i < MAX_VOLTMETER_LOGICAL_INPUTS; ++i) {
+        consolidatedHistory[i].clear();
+        consolidatedTraceVisible[i] = false;
+        consolidatedValueLabels.at(i)->hide();
+        if (i >= keys.size())
+            continue;
+        consolidatedHistory[i] = previousHistory.value(keys.at(i));
+        consolidatedTraceVisible[i] = previousVisibility.value(keys.at(i), false);
+        consolidatedValueLabels.at(i)->setName(labels.value(i));
+        if (consolidatedTraceVisible[i])
+            consolidatedValueLabels.at(i)->show();
+    }
+    updateConsolidatedChart();
 }
 
 void VoltmeterWindow::showEmptyCalcs(){
@@ -243,10 +584,11 @@ void VoltmeterWindow::setPinsAndNumChannels(QString pins[], int numOfCh)
 
 void VoltmeterWindow::appendDatalog(ChannelData data[], int numChannels)
 {
+    Q_UNUSED(numChannels);
     QDateTime now;
     *logStream << QString::number(logSampleIndex)+","+now.currentDateTime().toString("dd.MM.yyyy") + "," +now.currentDateTime().toString("hh:mm:ss.zzz") + ","+ QString::number(currentVdd) ;
 
-    for(int i = 0; i < numChannels; i++){
+    for(int i = 0; i < MAX_VOLTMETER_CHANNELS; i++){
         *logStream << ","+QString::number(data[i].voltage);
        // *logStream << ","+QString::number(data[i].min);
        // *logStream << ","+QString::number(data[i].max);
@@ -259,6 +601,26 @@ void VoltmeterWindow::appendDatalog(ChannelData data[], int numChannels)
     labelFile->setValue("Logging active (" + QString::number(logSampleIndex) + " smpl)");
 }
 
+void VoltmeterWindow::appendLogicalDatalog(const ChannelData data[], const QStringList &names,
+                                           int logicalCount)
+{
+    if (!isDataLogRunning)
+        return;
+    QDateTime now;
+    *logStream << QString::number(logSampleIndex) + "," +
+                  now.currentDateTime().toString("dd.MM.yyyy") + "," +
+                  now.currentDateTime().toString("hh:mm:ss.zzz") + "," + QString::number(currentVdd);
+    const int columns = qMin(logicalCount, datalogLogicalNames.size());
+    for (int i = 0; i < columns; ++i)
+        *logStream << "," + QString::number(data[i].voltage);
+    for (int i = columns; i < datalogLogicalNames.size(); ++i)
+        *logStream << ",";
+    *logStream << "\n";
+    ++logSampleIndex;
+    labelFile->setValue("Logging active (" + QString::number(logSampleIndex) + " smpl)");
+    Q_UNUSED(names);
+}
+
 void VoltmeterWindow::stopDatalog()
 {
     if(isDataLogRunning){
@@ -267,6 +629,15 @@ void VoltmeterWindow::stopDatalog()
         buttonStartLog->setText("Start",0);
     buttonStartLog->setColor(Graphics::palette().warning,0);
         buttonSelectFile->enableAll(true);
+        buttonsAcquisitionMode->enableAll(true);
+        buttonsAcquisitionMode->setDisabledButton(!hasSelectableInput, 1);
+        buttonsChannelEnable->enableAll(!isMultimode());
+        buttonsView->enableAll(!isMultimode());
+        for (const QList<WidgetButtons *> &rows : inputButtonRows) {
+            for (WidgetButtons *row : rows)
+                row->enableAll(isMultimode());
+        }
+        datalogLogicalNames.clear();
         labelFile->setValue("Log stopped (" + QString::number(logSampleIndex) + " smpl)");
     }
 }
@@ -282,16 +653,29 @@ void VoltmeterWindow::startDatalog()
         if(logFile->open(QFile::WriteOnly | QFile::Truncate)){
             logStream = new QTextStream(logFile);
             *logStream << "sample ID,date,time,Vdd";
-            //logStream->operator<<("sample,date,time,");
-            for(int i = 0; i < MAX_VOLTMETER_CHANNELS; i++){
-                *logStream << ",Voltage CH"+QString::number(i+1);
-               // *logStream << ",Min CH"+QString::number(i+1);
-               // *logStream << ",Max CH"+QString::number(i+1);
-               // *logStream << ",Ripple CH"+QString::number(i+1);
-               // *logStream << ",Frequency CH"+QString::number(i+1);
+            datalogMultimode = isMultimode();
+            datalogLogicalNames.clear();
+            if (datalogMultimode) {
+                for (int slot = 0; slot < availableInputSlots; ++slot) {
+                    for (const QString &name : selectedInputNames(slot)) {
+                        const QString column = "CH" + QString::number(slot + 1) + " " + name;
+                        datalogLogicalNames.append(column);
+                        *logStream << ",Voltage " + column;
+                    }
+                }
+            } else {
+                for(int i = 0; i < MAX_VOLTMETER_CHANNELS; i++)
+                    *logStream << ",Voltage CH"+QString::number(i+1);
             }
             *logStream << "\n";
             isDataLogRunning = true;
+            buttonsAcquisitionMode->disableAll();
+            buttonsChannelEnable->enableAll(!datalogMultimode);
+            buttonsView->enableAll(!datalogMultimode);
+            for (const QList<WidgetButtons *> &rows : inputButtonRows) {
+                for (WidgetButtons *row : rows)
+                    row->enableAll(datalogMultimode);
+            }
             buttonStartLog->setText("Stop",0);
             buttonStartLog->setColor(Graphics::palette().running,0);
             buttonSelectFile->enableAll(false);
@@ -305,15 +689,69 @@ void VoltmeterWindow::startDatalog()
 void VoltmeterWindow::channelEnableCallback(int status)
 {
     int numChEnabled=0;
-    for(int i =0;i<4;i++){
+    for(int i =0;i<MAX_VOLTMETER_CHANNELS;i++){
         if((int)(pow(2,i))&(status)){
-            displays.at(i)->show();
+            displays.at(i)->setVisible(buttonsView->getSelectedIndex() == 0);
+            consolidatedValueLabels.at(i)->setVisible(buttonsView->getSelectedIndex() == 1);
             numChEnabled = i+1;
         }else{
             displays.at(i)->hide();
+            consolidatedValueLabels.at(i)->hide();
         }
     }
+    updateConsolidatedChart();
     emit numChannelsEnabledChanged(numChEnabled);
+}
+
+void VoltmeterWindow::viewCallback(int index)
+{
+    const bool consolidated = index == 1;
+    consolidatedView->setVisible(consolidated);
+    const int channelMask = enabledChannelMask();
+    for (int i = 0; i < MAX_VOLTMETER_LOGICAL_INPUTS; i++) {
+        if (i >= MAX_VOLTMETER_CHANNELS) {
+            consolidatedValueLabels.at(i)->hide();
+            continue;
+        }
+        const bool channelEnabled = (channelMask & (1 << i)) != 0;
+        displays.at(i)->setVisible(!consolidated && channelEnabled);
+        consolidatedValueLabels.at(i)->setVisible(consolidated && channelEnabled);
+    }
+    updateConsolidatedChart();
+}
+
+void VoltmeterWindow::updateConsolidatedChart()
+{
+    const int channelMask = enabledChannelMask();
+    qreal minValue = std::numeric_limits<qreal>::max();
+    qreal maxValue = std::numeric_limits<qreal>::lowest();
+    for (int i = 0; i < MAX_VOLTMETER_LOGICAL_INPUTS; i++) {
+        const bool visible = isMultimode()
+                                 ? consolidatedTraceVisible.at(i)
+                                 : i < MAX_VOLTMETER_CHANNELS && (channelMask & (1 << i));
+        if (visible) {
+            consolidatedChart->updateTrace(&consolidatedHistory[i], i);
+            for (const QPointF &point : consolidatedHistory.at(i)) {
+                minValue = qMin(minValue, point.y());
+                maxValue = qMax(maxValue, point.y());
+            }
+        } else {
+            QVector<QPointF> emptyTrace;
+            consolidatedChart->updateTrace(&emptyTrace, i);
+        }
+    }
+
+    const qreal xMax = qMax<qreal>(HISTORY_SIZE, consolidatedSampleTime);
+    const qreal xMin = qMax<qreal>(0, xMax - HISTORY_SIZE);
+    consolidatedChart->setDataMinMax(xMin, xMax);
+    consolidatedChart->setRangeX(xMin, xMax);
+    if (minValue == std::numeric_limits<qreal>::max()) {
+        consolidatedChart->setRangeY(0, 3.3);
+    } else {
+        const qreal span = maxValue - minValue;
+        const qreal margin = span > 0 ? span * 0.1 : qMax<qreal>(0.1, qAbs(maxValue) * 0.1);
+        consolidatedChart->setRangeY(minValue - margin, maxValue + margin);
+    }
 }
 
 void VoltmeterWindow::averagingCallback(int value)
