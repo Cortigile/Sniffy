@@ -60,6 +60,16 @@ ScopeWindow::ScopeWindow(ScopeConfig *config, QWidget *parent) :
     chartFFT->setRange(0, 50000, 0, 8);
     chartFFT->setDataMinMax(0,50000);
     chartFFT->enableLocalMouseEvents(EventSelection::ALL);
+    chart->setObjectName("scopeChart");
+    chartFFT->setObjectName("scopeFFTChart");
+    chart->setCursorsDraggable(true);
+    chartFFT->setCursorsDraggable(true);
+    connect(chart, &widgetChart::cursorDragged, this, [this](bool horizontal, Cursor cursor, qreal value) {
+        cursorDragged(false, horizontal, cursor, value);
+    });
+    connect(chartFFT, &widgetChart::cursorDragged, this, [this](bool horizontal, Cursor cursor, qreal value) {
+        cursorDragged(true, horizontal, cursor, value);
+    });
 
     splitter = new QSplitter(Qt::Vertical, this);
     splitter->addWidget(chartFFT);
@@ -569,6 +579,31 @@ void ScopeWindow::cursorValueVerCallback()
         setVerticalCursors(config->cursorChannelIndex);
         updateCursorReadings();
     }
+}
+
+void ScopeWindow::cursorDragged(bool fft, bool horizontal, Cursor cursor, qreal value)
+{
+    const bool fftSelected = config->FFTenabled && panelMath->mathType->getSelectedIndex() == 3 &&
+                             config->cursorChannelIndex == MATH_CHANNEL_INDEX;
+    if (fft != fftSelected || config->cursorsActiveIndex != (horizontal ? 1 : 2))
+        return;
+    const bool first = cursor == Cursor::CURSOR_A;
+    WidgetDialRange *dial = nullptr;
+    if (fft) {
+        dial = horizontal ? (first ? panelCursors->cursorFFTHorADial : panelCursors->cursorFFTHorBDial)
+                          : (first ? panelCursors->cursorFFTVerADial : panelCursors->cursorFFTVerBDial);
+    } else if (horizontal) {
+        dial = first ? panelCursors->cursorHorADial : panelCursors->cursorHorBDial;
+        if (xyMode) {
+            const float scale = config->channelScale[xyChannelX];
+            value = value * (std::fabs(scale) < 1e-15f ? 1.0f : scale) - config->channelOffset[xyChannelX];
+        }
+    } else {
+        dial = first ? panelCursors->cursorVerADial : panelCursors->cursorVerBDial;
+        const int channel = config->cursorChannelIndex;
+        value = value * config->channelScale[channel] - config->channelOffset[channel];
+    }
+    dial->setRealValue(qBound(qreal(dial->getRangeMin()), value, qreal(dial->getRangeMax())));
 }
 
 void ScopeWindow::resolutionChangedCallback(int index){

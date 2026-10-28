@@ -1,5 +1,19 @@
 #include "widgetlabelarea.h"
 #include "ui_widgetlabelarea.h"
+#include <cmath>
+
+namespace {
+QString formatCursorDelta(qreal value, const QString &unit)
+{
+    if (!std::isfinite(value))
+        return LabelFormator::formatOutout(value, unit);
+    if (value == 0)
+        return "0.000 " + unit;
+    const int exponent = static_cast<int>(std::floor(std::log10(std::abs(value))));
+    const int prefixExponent = qBound(-9, static_cast<int>(std::floor(exponent / 3.0)) * 3, 9);
+    return LabelFormator::formatOutout(value, unit, qMax(0, 3 - (exponent - prefixExponent)));
+}
+}
 
 WidgetLabelArea::WidgetLabelArea(QWidget *parent) :
     QWidget(parent),
@@ -123,7 +137,7 @@ void WidgetLabelArea::setCursorVoltageReadings(qreal curA, qreal curB)
     ui->label_Vcursor_title->setText("Cursors:");
     ui->label_Vcursor1->setText("A: "+ LabelFormator::formatOutout(curA,"V"));
     ui->label_Vcursor2->setText("B: "+ LabelFormator::formatOutout(curB,"V"));
-    ui->label_Vcursor3->setText("Diff: "+ LabelFormator::formatOutout(curA-curB,"V"));
+    ui->label_Vcursor3->setText("Diff: "+ formatCursorDelta(curA-curB,"V"));
     ui->widget_Vcursors->show();
 }
 
@@ -131,7 +145,7 @@ void WidgetLabelArea::setCursorVoltageReadingsX(qreal curA, qreal curB)
 {
     ui->label_Hcursor_title->setText("A: "+ LabelFormator::formatOutout(curA,"V"));
     ui->label_Hcursor1->setText("B: "+ LabelFormator::formatOutout(curB,"V"));
-    ui->label_Hcursor2->setText("Diff: "+ LabelFormator::formatOutout(curA-curB,"V"));
+    ui->label_Hcursor2->setText("Diff: "+ formatCursorDelta(curA-curB,"V"));
     ui->label_Hcursor3->setText("");
     ui->widget_Hcursors->show();
 }
@@ -140,8 +154,8 @@ void WidgetLabelArea::setCursorTimeReadings(qreal curA, qreal curB)
 {
     ui->label_Hcursor_title->setText("A: "+ LabelFormator::formatOutout(curA,"s"));
     ui->label_Hcursor1->setText("B: "+ LabelFormator::formatOutout(curB,"s"));
-    ui->label_Hcursor2->setText("Diff: "+ LabelFormator::formatOutout(curA-curB,"s"));
-    ui->label_Hcursor3->setText("Freq: "+ LabelFormator::formatOutout(abs(1/(curA-curB)),"Hz"));
+    ui->label_Hcursor2->setText("Diff: "+ formatCursorDelta(curA-curB,"s"));
+    ui->label_Hcursor3->setText("Freq: "+ formatCursorDelta(abs(1/(curA-curB)),"Hz"));
     ui->widget_Hcursors->show();
 }
 
@@ -149,7 +163,7 @@ void WidgetLabelArea::setCursorFFTFreqReadings(qreal curA, qreal curB)
 {
     ui->label_Hcursor_title->setText("A: "+ LabelFormator::formatOutout(curA,"Hz"));
     ui->label_Hcursor1->setText("B: "+ LabelFormator::formatOutout(curB,"Hz"));
-    ui->label_Hcursor2->setText("Diff: "+ LabelFormator::formatOutout(curA-curB,"Hz"));
+    ui->label_Hcursor2->setText("Diff: "+ formatCursorDelta(curA-curB,"Hz"));
     ui->label_Hcursor3->setText("");
     ui->widget_Hcursors->show();
 }
@@ -159,7 +173,7 @@ void WidgetLabelArea::setCursorFFTAmplitudeReadings(qreal curA, qreal curB, QStr
     ui->label_Vcursor_title->setText("Cursors:");
     ui->label_Vcursor1->setText("A: "+ LabelFormator::formatOutout(curA,unit));
     ui->label_Vcursor2->setText("B: "+ LabelFormator::formatOutout(curB,unit));
-    ui->label_Vcursor3->setText("Diff: "+ LabelFormator::formatOutout(curA-curB,unit));
+    ui->label_Vcursor3->setText("Diff: "+ formatCursorDelta(curA-curB,unit));
     ui->widget_Vcursors->show();
 }
 
@@ -179,4 +193,3 @@ void WidgetLabelArea::hideCursorReadingsHor()
 {
     ui->widget_Hcursors->hide();
 }
-

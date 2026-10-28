@@ -1,6 +1,10 @@
 #include <QtTest>
 #include <QIODevice>
 #include <QSlider>
+#include <QGraphicsScene>
+#include "gui/widgetdialrange.h"
+#include "gui/widgetlabelarea.h"
+#include <QLabel>
 #include <cmath>
 #include "modules/scope/scope.h"
 
@@ -42,6 +46,16 @@ class ScopeTest : public QObject
         return data;
     }
 
+    static void sceneMouse(widgetChart &chart, QEvent::Type type, QPointF position,
+                           Qt::MouseButton button, Qt::MouseButtons buttons)
+    {
+        QGraphicsSceneMouseEvent event(type);
+        event.setScenePos(chart.getChart()->mapToScene(position));
+        event.setButton(button);
+        event.setButtons(buttons);
+        QApplication::sendEvent(chart.getChart()->scene(), &event);
+    }
+
 private slots:
     void initTestCase()
     {
@@ -57,6 +71,200 @@ private slots:
         QCOMPARE(history.at(0).channels[0][0].y(), 12.0);
         QCOMPARE(history.at(127).channels[0][0].y(), 139.0);
         QCOMPARE(history.liveData(), history.at(127).channels);
+    }
+
+    void draggingChartCursors()
+    {
+        widgetChart chart(nullptr, 1);
+        chart.resize(800, 500);
+        chart.enableLocalMouseEvents(EventSelection::ALL);
+        chart.setCursorsDraggable(true);
+        chart.setRange(0, 100, -1, 1);
+        chart.setDataMinMax(0, 100);
+        chart.show();
+        QApplication::processEvents();
+        chart.setHorizontalCursor(0, 25, Cursor::CURSOR_A);
+        chart.setHorizontalCursor(0, 75, Cursor::CURSOR_B);
+        QSignalSpy dragged(&chart, &widgetChart::cursorDragged);
+        QSignalSpy zoomed(&chart, &widgetChart::localZoomChanged);
+        const QRectF plot = chart.getChart()->plotArea();
+        QVERIFY(plot.width() > 0);
+        const QPointF start(plot.left() + plot.width() * 0.25 + 3, plot.center().y());
+        const QPointF end(plot.left() + plot.width() * 0.4, plot.center().y());
+        sceneMouse(chart, QEvent::GraphicsSceneMousePress, start, Qt::LeftButton, Qt::LeftButton);
+        sceneMouse(chart, QEvent::GraphicsSceneMouseMove, end, Qt::NoButton, Qt::LeftButton);
+        sceneMouse(chart, QEvent::GraphicsSceneMouseRelease, end, Qt::LeftButton, Qt::NoButton);
+        QCOMPARE(dragged.size(), 2);
+        QVERIFY(dragged.last()[0].toBool());
+        QCOMPARE(qvariant_cast<Cursor>(dragged.last()[1]), Cursor::CURSOR_A);
+        QVERIFY(qAbs(dragged.last()[2].toDouble() - 40) < 0.001);
+        QCOMPARE(zoomed.size(), 0);
+
+        dragged.clear();
+        chart.clearAllCursors();
+        chart.setVerticalCursor(0, 0.5, Cursor::CURSOR_B);
+        const QPointF amplitudeStart(plot.center().x(), plot.top() + plot.height() * 0.25);
+        const QPointF amplitudeEnd(plot.center().x(), plot.top() + plot.height() * 0.75);
+        sceneMouse(chart, QEvent::GraphicsSceneMousePress, amplitudeStart, Qt::LeftButton, Qt::LeftButton);
+        sceneMouse(chart, QEvent::GraphicsSceneMouseMove, amplitudeEnd, Qt::NoButton, Qt::LeftButton);
+        sceneMouse(chart, QEvent::GraphicsSceneMouseRelease, amplitudeEnd, Qt::LeftButton, Qt::NoButton);
+        QCOMPARE(dragged.size(), 2);
+        QVERIFY(!dragged.last()[0].toBool());
+        QCOMPARE(qvariant_cast<Cursor>(dragged.last()[1]), Cursor::CURSOR_B);
+        QVERIFY(qAbs(dragged.last()[2].toDouble() + 0.5) < 0.001);
+        QCOMPARE(zoomed.size(), 0);
+
+        dragged.clear();
+        sceneMouse(chart, QEvent::GraphicsSceneMousePress, amplitudeStart, Qt::LeftButton, Qt::LeftButton);
+        const QPointF outside(plot.center().x(), plot.bottom() + 100);
+        sceneMouse(chart, QEvent::GraphicsSceneMouseRelease, outside, Qt::LeftButton, Qt::NoButton);
+        QCOMPARE(dragged.last()[2].toDouble(), -1.0);
+        chart.clearAllCursors();
+        dragged.clear();
+        sceneMouse(chart, QEvent::GraphicsSceneMousePress, start, Qt::LeftButton, Qt::LeftButton);
+        sceneMouse(chart, QEvent::GraphicsSceneMouseMove, end, Qt::NoButton, Qt::LeftButton);
+        sceneMouse(chart, QEvent::GraphicsSceneMouseRelease, end, Qt::LeftButton, Qt::NoButton);
+        QVERIFY(dragged.isEmpty());
+        QVERIFY(!zoomed.isEmpty());
+    }
+
+    void cursorReadoutPrecision()
+    {
+        WidgetLabelArea readings;
+        auto *difference = readings.findChild<QLabel *>("label_Hcursor2");
+        auto *frequency = readings.findChild<QLabel *>("label_Hcursor3");
+        auto *amplitude = readings.findChild<QLabel *>("label_Vcursor3");
+        QVERIFY(difference && frequency && amplitude);
+        readings.setCursorTimeReadings(0.001234, 0);
+        QCOMPARE(difference->text(), QString("Diff: 1.234 ms"));
+        QCOMPARE(frequency->text(), QString("Freq: 810.4 Hz"));
+        readings.setCursorTimeReadings(0, 0);
+        QCOMPARE(difference->text(), QString("Diff: 0.000 s"));
+        QCOMPARE(frequency->text(), QString("Freq: N/A Hz"));
+        readings.setCursorVoltageReadings(12.345, 0);
+        QCOMPARE(amplitude->text(), QString("Diff: 12.35 V"));
+        readings.setCursorVoltageReadingsX(-0.12345, 0);
+        QCOMPARE(difference->text(), QString("Diff: -123.5 mV"));
+        readings.setCursorFFTFreqReadings(12345, 0);
+        QCOMPARE(difference->text(), QString("Diff: 12.35 kHz"));
+        readings.setCursorFFTAmplitudeReadings(1.234, 0, "Vrms");
+        QCOMPARE(amplitude->text(), QString("Diff: 1.234 Vrms"));
+    }
+
+    void draggingUpdatesScopeControls()
+    {
+        ScopeConfig config;
+        ScopeWindow window(&config);
+        auto *chart = window.findChild<widgetChart *>("scopeChart");
+        auto *fft = window.findChild<widgetChart *>("scopeFFTChart");
+        auto *types = window.findChild<WidgetButtons *>("cursortypeSel");
+        auto *timeA = window.findChild<WidgetDialRange *>("horCurA");
+        auto *voltageB = window.findChild<WidgetDialRange *>("verCurB");
+        QVERIFY(chart && fft && types && timeA && voltageB);
+        timeA->updateRange(-1, 1);
+        types->clicked(1);
+        chart->cursorDragged(true, Cursor::CURSOR_A, 0.25);
+        QCOMPARE(timeA->getRealValue(), 0.25f);
+        config.channelScale[0] = 2;
+        config.channelOffset[0] = 0.5;
+        voltageB->updateRange(-10, 10);
+        types->clicked(2);
+        chart->cursorDragged(false, Cursor::CURSOR_B, 1.5);
+        QCOMPARE(voltageB->getRealValue(), 2.5f);
+        chart->cursorDragged(false, Cursor::CURSOR_B, 100);
+        QCOMPARE(voltageB->getRealValue(), 10.0f);
+        fft->cursorDragged(false, Cursor::CURSOR_B, 0);
+        QCOMPARE(voltageB->getRealValue(), 10.0f);
+        types->clicked(0);
+        chart->cursorDragged(false, Cursor::CURSOR_B, 0);
+        QCOMPARE(voltageB->getRealValue(), 10.0f);
+    }
+
+    void cursorDragThroughViewport()
+    {
+        widgetChart chart(nullptr, 1);
+        chart.resize(800, 500);
+        chart.enableLocalMouseEvents(EventSelection::ALL);
+        chart.setCursorsDraggable(true);
+        chart.setRange(0, 100, -1, 1);
+        chart.setDataMinMax(0, 100);
+        if (QGuiApplication::platformName() == "offscreen")
+            for (auto *series : chart.getChart()->series())
+                series->setUseOpenGL(false);
+        chart.show();
+        QApplication::processEvents();
+        chart.setRangeX(20, 60);
+        chart.setHorizontalCursor(0, 30, Cursor::CURSOR_A);
+        chart.setHorizontalCursor(0, 50, Cursor::CURSOR_B);
+        connect(&chart, &widgetChart::cursorDragged, &chart,
+                [&chart](bool horizontal, Cursor cursor, qreal value) {
+            if (horizontal)
+                chart.setHorizontalCursor(0, value, cursor);
+        });
+        auto *view = chart.findChild<QChartView *>();
+        QVERIFY(view);
+        const QRectF plot = chart.getChart()->plotArea();
+        const QPoint start = view->mapFromScene(chart.getChart()->mapToScene(
+            QPointF(plot.left() + plot.width() * 0.75, plot.center().y())));
+        const QPoint end = view->mapFromScene(chart.getChart()->mapToScene(
+            QPointF(plot.left() + plot.width() * 0.9, plot.center().y())));
+        QSignalSpy dragged(&chart, &widgetChart::cursorDragged);
+        QSignalSpy zoomed(&chart, &widgetChart::localZoomChanged);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(view->viewport(), end);
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, end);
+        QVERIFY(!dragged.isEmpty());
+        QCOMPARE(qvariant_cast<Cursor>(dragged.last()[1]), Cursor::CURSOR_B);
+        QVERIFY(qAbs(dragged.last()[2].toDouble() - 56) < 0.2);
+        QCOMPARE(zoomed.size(), 0);
+
+        dragged.clear();
+        chart.setCursorsDraggable(false);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, end);
+        QTest::mouseMove(view->viewport(), start);
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, start);
+        QVERIFY(dragged.isEmpty());
+        QVERIFY(!zoomed.isEmpty());
+    }
+
+    void draggingFFTAndXYControls()
+    {
+        ScopeConfig config;
+        ScopeWindow window(&config);
+        auto *chart = window.findChild<widgetChart *>("scopeChart");
+        auto *fft = window.findChild<widgetChart *>("scopeFFTChart");
+        auto *types = window.findChild<WidgetButtons *>("cursortypeSel");
+        auto *channels = window.findChild<WidgetButtons *>("cursorChannSelection");
+        auto *math = window.findChild<WidgetButtons *>("MathTypeBtnSelection");
+        auto *timeA = window.findChild<WidgetDialRange *>("horCurA");
+        auto *freqB = window.findChild<WidgetDialRange *>("FFThorCurB");
+        auto *ampA = window.findChild<WidgetDialRange *>("FFTverCurA");
+        QVERIFY(chart && fft && types && channels && math && timeA && freqB && ampA);
+        QVERIFY(QMetaObject::invokeMethod(&window, "modeChangedCallback", Q_ARG(int, 1)));
+        config.channelScale[0] = 2;
+        config.channelOffset[0] = 0.5;
+        timeA->updateRange(-10, 10);
+        types->setChecked(true, 1);
+        types->clicked(1);
+        chart->cursorDragged(true, Cursor::CURSOR_A, 1.5);
+        QCOMPARE(timeA->getRealValue(), 2.5f);
+
+        QVERIFY(QMetaObject::invokeMethod(&window, "modeChangedCallback", Q_ARG(int, 0)));
+        math->setChecked(true, 3);
+        math->clicked(3);
+        QVERIFY(config.FFTenabled);
+        channels->setChecked(true, MATH_CHANNEL_INDEX);
+        channels->clicked(MATH_CHANNEL_INDEX);
+        freqB->updateRange(0, 50000);
+        fft->cursorDragged(true, Cursor::CURSOR_B, 12000);
+        QCOMPARE(freqB->getRealValue(), 12000.0f);
+        types->clicked(2);
+        ampA->updateRange(-100, 10);
+        config.FFTisLog = true;
+        fft->cursorDragged(false, Cursor::CURSOR_A, -40);
+        QCOMPARE(ampA->getRealValue(), -40.0f);
+        chart->cursorDragged(false, Cursor::CURSOR_A, 0);
+        QCOMPARE(ampA->getRealValue(), -40.0f);
     }
 
     void averagingControls()

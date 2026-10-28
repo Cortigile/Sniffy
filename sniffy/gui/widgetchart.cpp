@@ -70,8 +70,6 @@ widgetChart::widgetChart(QWidget *parent, int maxTraces) :
         chart->addSeries(seriesCursor);
         seriesCursor->attachAxis(axisX);
         seriesCursor->attachAxis(axisY_UnitRange);
-        connect(seriesCursor,&QLineSeries::pressed,this,&widgetChart::handleCursorPress);
-        connect(seriesCursor,&QLineSeries::released,this,&widgetChart::handleCursorRelease);
     }
     for (int i = 0; i < 2; i++){
         QLineSeries *seriesCursor = new QLineSeries;
@@ -122,6 +120,7 @@ widgetChart::widgetChart(QWidget *parent, int maxTraces) :
 
 widgetChart::~widgetChart()
 {
+    finishCursorDrag();
     delete ui;
 }
 
@@ -207,9 +206,19 @@ void widgetChart::createSeries(QAbstractSeries *series){
 }
 
 
+bool widgetChart::event(QEvent *event)
+{
+    if (event->type() == QEvent::Hide || event->type() == QEvent::WindowDeactivate)
+        finishCursorDrag();
+    return QWidget::event(event);
+}
+
 bool widgetChart::eventFilter(QObject *obj, QEvent *event)
 {    
     Q_UNUSED(obj);
+
+    if (handleCursorDrag(event))
+        return true;
 
     // Process zoom and pan for ALL mode (same structure as original)
     if(eventSel != EventSelection::CLICKS_ONLY){
@@ -862,6 +871,7 @@ void widgetChart::setVerticalCursor(int channelIndex, qreal value, Cursor type)
 
 void widgetChart::clearAllCursors()
 {
+    finishCursorDrag();
     cursorsVertical[0]->clear();
     cursorsVertical[1]->clear();
     cursorsHorizontal[0]->clear();
@@ -921,15 +931,90 @@ void widgetChart::hovered(const QPointF &point){
     chart->setToolTip(coords);
 }
 
-void widgetChart::handleCursorPress()
+void widgetChart::setCursorsDraggable(bool enabled)
 {
-    QApplication::setOverrideCursor(QCursor(Qt::SizeHorCursor));
-    qDebug () << "cursor clicked";
+    cursorsDraggable = enabled;
+    if (!enabled)
+        finishCursorDrag();
 }
 
-void widgetChart::handleCursorRelease()
+void widgetChart::finishCursorDrag()
 {
-    QApplication::restoreOverrideCursor();
+    if (draggedCursorIndex >= 0) {
+        draggedCursorIndex = -1;
+        QApplication::restoreOverrideCursor();
+    }
+}
+
+void widgetChart::moveDraggedCursor(const QPointF &scenePos)
+{
+    const QRectF plot = chart->plotArea();
+    if (plot.width() <= 0 || plot.height() <= 0)
+        return;
+    const QPointF position = chart->mapFromScene(scenePos);
+    const qreal fraction = draggedCursorHorizontal
+        ? qBound(qreal(0), (position.x() - plot.left()) / plot.width(), qreal(1))
+        : qBound(qreal(0), (plot.bottom() - position.y()) / plot.height(), qreal(1));
+    const auto *axis = draggedCursorHorizontal ? axisX : axisY;
+    const qreal value = axis->min() + fraction * (axis->max() - axis->min());
+    emit cursorDragged(draggedCursorHorizontal,
+                       draggedCursorIndex == 0 ? Cursor::CURSOR_A : Cursor::CURSOR_B, value);
+}
+
+bool widgetChart::handleCursorDrag(QEvent *event)
+{
+    if (!cursorsDraggable)
+        return false;
+    if (draggedCursorIndex >= 0 &&
+        (event->type() == QEvent::GraphicsSceneHoverEnter || event->type() == QEvent::GraphicsSceneHoverLeave))
+        return true;
+    if (event->type() == QEvent::GraphicsSceneMouseMove && draggedCursorIndex >= 0) {
+        auto *mouse = static_cast<QGraphicsSceneMouseEvent *>(event);
+        if (mouse->buttons() & Qt::LeftButton)
+            moveDraggedCursor(mouse->scenePos());
+        else
+            finishCursorDrag();
+        return true;
+    }
+    if (event->type() == QEvent::GraphicsSceneMouseRelease && draggedCursorIndex >= 0) {
+        auto *mouse = static_cast<QGraphicsSceneMouseEvent *>(event);
+        if (mouse->button() == Qt::LeftButton) {
+            moveDraggedCursor(mouse->scenePos());
+            finishCursorDrag();
+        }
+        return true;
+    }
+    if (event->type() != QEvent::GraphicsSceneMousePress)
+        return false;
+    auto *mouse = static_cast<QGraphicsSceneMouseEvent *>(event);
+    if (mouse->button() != Qt::LeftButton)
+        return false;
+    if (isPointInGridAlphaDot(mouse->scenePos()) || isPointInLineThicknessIcon(mouse->scenePos()))
+        return false;
+    const QPointF position = chart->mapFromScene(mouse->scenePos());
+    if (!chart->plotArea().contains(position))
+        return false;
+    qreal closest = 8; // Hit tolerance in logical pixels, independent of axis scale.
+    for (bool horizontal : {true, false}) {
+        const auto &cursors = horizontal ? cursorsHorizontal : cursorsVertical;
+        for (int i = 0; i < cursors.size(); ++i) {
+            auto *series = cursors.at(i);
+            if (!series->isVisible() || series->count() == 0)
+                continue;
+            const QPointF point = chart->mapToPosition(series->at(0), series);
+            const qreal distance = horizontal ? qAbs(position.x() - point.x()) : qAbs(position.y() - point.y());
+            if (distance < closest) {
+                closest = distance;
+                draggedCursorIndex = i;
+                draggedCursorHorizontal = horizontal;
+            }
+        }
+    }
+    if (draggedCursorIndex < 0)
+        return false;
+    mousePressed = false;
+    QApplication::setOverrideCursor(QCursor(draggedCursorHorizontal ? Qt::SizeHorCursor : Qt::SizeVerCursor));
+    return true;
 }
 
 bool widgetChart::mapSceneToPlotNormalized(const QPointF &scenePos, qreal &nx, qreal &ny) const

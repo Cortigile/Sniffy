@@ -46,6 +46,7 @@ class WidgetButtons;
 class WidgetDial;
 class WidgetDialRange;
 class WidgetTextInput;
+enum class Cursor;
 
 #include <QVector>
 #include <QPointF>
@@ -148,6 +149,7 @@ private slots:
     void updateCursorReadings();
     void setHorizontalCursors(int channelIndex);
     void setVerticalCursors(int channelIndex);
+    void cursorDragged(bool fft, bool horizontal, Cursor cursor, qreal value);
 
 
 public:

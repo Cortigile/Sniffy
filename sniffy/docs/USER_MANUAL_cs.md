@@ -531,6 +531,12 @@ Umožňuje pracovat s kurzory v časové a amplitudové oblasti. K dispozici jso
 - kurzory i pro FFT pohled,
 - volba typu kurzorů a přiřazeného kanálu.
 
+Po zapnutí kurzorů lze obě čáry přetahovat přímo v grafu levým tlačítkem myši.
+Ovládací prvky a naměřené hodnoty se průběžně aktualizují. Časové/frekvenční
+kurzory se pohybují doleva a doprava, amplitudové nahoru a dolů. Přetahování
+funguje i v FFT a XY pohledu a respektuje napěťové měřítko a posun kanálu.
+Tažení mimo čáry kurzorů nadále posouvá graf; zoom kolečkem zůstává beze změny.
+
 ### 10.4 Záložka Math
 
 Math umožňuje dva typy práce:

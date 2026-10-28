@@ -121,6 +121,7 @@ public:
     void setHorizontalCursor(int channelIndex, qreal value, Cursor type);
     void setVerticalCursor(int channelIndex, qreal value, Cursor type);
     void clearAllCursors();
+    void setCursorsDraggable(bool enabled);
 
     // Map a scene position to normalized coordinates within the plot area (0..1 each).
     // Returns true if the point lies within the plot area; nx, ny are clamped to 0..1 regardless.
@@ -137,6 +138,12 @@ private:
 
     QList<QXYSeries *> cursorsHorizontal;
     QList<QXYSeries *> cursorsVertical;
+    bool cursorsDraggable = false;
+    int draggedCursorIndex = -1;
+    bool draggedCursorHorizontal = false;
+    void moveDraggedCursor(const QPointF &scenePos);
+    void finishCursorDrag();
+    bool handleCursorDrag(QEvent *event);
 
     QMenu *menu;
     QAction *spline, *line, *scatter, *btnOpenGL;
@@ -212,6 +219,7 @@ private:
     void createSeries(QAbstractSeries *series);
 
     bool eventFilter(QObject *obj, QEvent *event) override;
+    bool event(QEvent *event) override;
 
     // mapping helpers
     static inline qreal percentToInternalShift(float percent){
@@ -227,6 +235,7 @@ signals:
     void chartSeriesChanged();
     void localZoomChanged();
     void mouseLeftClickEvent(QGraphicsSceneMouseEvent* event);
+    void cursorDragged(bool horizontal, Cursor cursor, qreal value);
 
 private slots:
     void switchToSplineSeriesCallback();
@@ -237,8 +246,6 @@ private slots:
 
     void rightClickCallback(const QPoint &mousePos);
     void hovered(const QPointF &point);
-    void handleCursorPress();
-    void handleCursorRelease();
 };
 
 // Internal: store current grid transparency percent

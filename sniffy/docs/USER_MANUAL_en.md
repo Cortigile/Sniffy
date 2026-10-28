@@ -531,6 +531,12 @@ Allows working with cursors in the time and amplitude domains. The following are
 - cursors for the FFT view as well,
 - selection of the cursor type and assigned channel.
 
+After enabling cursors, drag either cursor line directly on the plot with the left
+mouse button. The cursor controls and readings update while dragging. Time/frequency
+cursors move left/right; amplitude cursors move up/down. This also works in FFT and
+XY views, with the selected channel's voltage scale and offset taken into account.
+Drag away from cursor lines to pan as before; mouse-wheel zoom is unchanged.
+
 ### 10.4 Math tab
 
 Math allows two types of work:

@@ -17,6 +17,10 @@ resets, complete-frame validation, history navigation, and acquisition pause/res
 Frames include the firmware's trailing `S_OK` marker. The default live-acquisition
 test checks startup with averaging off, unaveraged sample values, and the next-capture
 command after each received frame.
+Cursor tests cover chart hit-testing, both drag directions, plot-edge clamping,
+control synchronization, voltage scale/offset conversion, and panning away from cursors.
+They also check the extra significant
+digit in difference/frequency readings, SI prefixes, and equal-cursor frequency handling.
 Stable-trigger noise reduction and physical stop/resume timing still need board testing.
 
 ## Voltmeter
