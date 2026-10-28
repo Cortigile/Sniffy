@@ -25,6 +25,7 @@ But it can be easily coppied so we can keep some template file.
 #include "gui/widgetbuttons.h"
 #include "gui/widgettab.h"
 #include "gui/widgettextinput.h"
+#include <QSignalBlocker>
 
 namespace {
     inline void transformSeries(const QVector<QPointF> &src, QVector<QPointF> &dst, float offset, float invScale){
@@ -141,6 +142,23 @@ ScopeWindow::ScopeWindow(ScopeConfig *config, QWidget *parent) :
     connect(panelAdvanced->modeButtons, &WidgetButtons::clicked, this, &ScopeWindow::modeChangedCallback);
     connect(panelAdvanced->channelXButtons, &WidgetButtons::clicked, this, &ScopeWindow::channelXChangedCallback);
     connect(panelAdvanced->channelYButtons, &WidgetButtons::clicked, this, &ScopeWindow::channelYChangedCallback);
+    connect(panelAdvanced->historySlider, &QSlider::valueChanged, this, &ScopeWindow::historyCaptureSelected);
+    connect(panelAdvanced->historyButtons, &WidgetButtons::clicked, this, [this](int index) {
+        if (index == 2) {
+            emit liveRequested();
+        } else {
+            const int selected = panelAdvanced->historySlider->value() + (index == 0 ? -1 : 1);
+            panelAdvanced->historySlider->setValue(selected);
+        }
+    });
+    const auto averagingChanged = [this]() {
+        const bool enabled = panelAdvanced->averagingMode->isCheckedRight();
+        panelAdvanced->averageWindow->setEnabled(enabled);
+        panelAdvanced->averageWindowLabel->setValue(QString("%1 captures").arg(panelAdvanced->averageWindow->value()));
+        emit averageWindowChanged(enabled ? panelAdvanced->averageWindow->value() : 1);
+    };
+    connect(panelAdvanced->averagingMode, &WidgetSwitch::clicked, this, averagingChanged);
+    connect(panelAdvanced->averageWindow, &QSlider::valueChanged, this, averagingChanged);
 
     //connect top slider and chart and other stuff
     connect(ui->sliderSignal, &QSlider::valueChanged, this, &ScopeWindow::sliderShiftCallback);
@@ -188,7 +206,7 @@ void ScopeWindow::showDataTraces(const QVector<QVector<QPointF>> &dataSeries, fl
 
 void ScopeWindow::paintTraces(const QVector<QVector<QPointF>> &dataSeries, const QVector<QPointF> &mathSeries){
     chart->clearAll();
-    labelInfoPanel->setTriggerLabelText("");
+    labelInfoPanel->setTriggerLabelText(historyBrowsing ? "History (paused)" : "");
     labelInfoPanel->hideChannelLabels();
 
     if (xyMode && numChannels >= 2) {
@@ -246,8 +264,10 @@ void ScopeWindow::paintTraces(const QVector<QVector<QPointF>> &dataSeries, const
         else if(zeroMarkerPosition<=CHART_MIN_Y)   chart-> setHorizontalMarker(i,CHART_MIN_Y,MarkerType::ARROW_DOWN_SMALL);
         else                                       chart-> setHorizontalMarker(i,zeroMarkerPosition,MarkerType::TICK);
 
-        float triggerMarkerPosition = (config->channelOffset[i]+(qreal(config->triggerLevel)/65535*(config->rangeMax-config->rangeMin)/1000))/config->channelScale[i];
-        if(panelSet->buttonsTriggerChannel->getSelectedIndex()==i) {
+        const int level = historyBrowsing ? displayedCapture.triggerLevel : config->triggerLevel;
+        float triggerMarkerPosition = (config->channelOffset[i]+(qreal(level)/65535*(displayedCapture.rangeMax-displayedCapture.rangeMin)/1000))/config->channelScale[i];
+        const int markerChannel = historyBrowsing ? triggerChannelIndex : panelSet->buttonsTriggerChannel->getSelectedIndex();
+        if(markerChannel==i) {
             chart-> setHorizontalMarker(i,triggerMarkerPosition,MarkerType::TRIGGER);
         }
 
@@ -255,13 +275,13 @@ void ScopeWindow::paintTraces(const QVector<QVector<QPointF>> &dataSeries, const
         labelInfoPanel->setChannelScale(i,LabelFormator::formatOutout(config->channelScale[i],"V/d"));
 
         if(config->FFTenabled){
-            panelCursors->cursorFFTHorADial->updateRange(0,config->realSamplingRate/2);
-            panelCursors->cursorFFTHorBDial->updateRange(0,config->realSamplingRate/2);
+            panelCursors->cursorFFTHorADial->updateRange(0,displayedCapture.samplingRate/2);
+            panelCursors->cursorFFTHorBDial->updateRange(0,displayedCapture.samplingRate/2);
         } else {
-            panelCursors->cursorHorADial->updateRange(config->timeMin,config->timeMax);
-            panelCursors->cursorHorBDial->updateRange(config->timeMin,config->timeMax);
-            panelCursors->cursorVerADial->updateRange((float)(config->rangeMin)/1000,(float)(config->rangeMax)/1000);
-            panelCursors->cursorVerBDial->updateRange((float)(config->rangeMin)/1000,(float)(config->rangeMax)/1000);
+            panelCursors->cursorHorADial->updateRange(captureTimeMin,captureTimeMax);
+            panelCursors->cursorHorBDial->updateRange(captureTimeMin,captureTimeMax);
+            panelCursors->cursorVerADial->updateRange(qreal(displayedCapture.rangeMin)/1000,qreal(displayedCapture.rangeMax)/1000);
+            panelCursors->cursorVerBDial->updateRange(qreal(displayedCapture.rangeMin)/1000,qreal(displayedCapture.rangeMax)/1000);
         }
         updateCursorReadings();
     }
@@ -501,7 +521,7 @@ void ScopeWindow::chartLocalZoomCallback()
     if(ui->sliderSignal->value()!= (int)(chart->getShift()*1000)){
         ui->sliderSignal->setValue((chart->getShift()*2000)-1000);
     }
-    updateChartTimeScale(config->timeBase);
+    updateChartTimeScale(historyBrowsing ? displayedCapture.timeBase : config->timeBase);
 }
 
 void ScopeWindow::cursorTypeCallback(int index)
@@ -743,6 +763,41 @@ void ScopeWindow::setRealSamplingRateAndLlength(int smpl, int len){
     panelAdvanced->samplingFrequencyReal->setValue(LabelFormator::formatOutout(smpl,"SPS",4));
 }
 
+void ScopeWindow::setCaptureMetadata(const ScopeCapture &capture)
+{
+    displayedCapture = capture;
+    captureTimeMin = capture.channels.first().first().x();
+    captureTimeMax = capture.channels.first().last().x();
+    setRealSamplingRateAndLlength(capture.samplingRate, capture.channels.first().size());
+}
+
+void ScopeWindow::setHistoryState(int count, int index, bool browsing, int averageCount, int averageWindow)
+{
+    historyBrowsing = browsing;
+    const QSignalBlocker blocker(panelAdvanced->historySlider);
+    panelAdvanced->historySlider->setRange(0, qMax(0, count - 1));
+    panelAdvanced->historySlider->setValue(qMax(0, index));
+    panelAdvanced->historySlider->setEnabled(count > 0);
+    panelAdvanced->historyButtons->setEnabledButton(index > 0, 0);
+    panelAdvanced->historyButtons->setEnabledButton(index >= 0 && index < count - 1, 1);
+    panelAdvanced->historyPosition->setValue(browsing
+        ? QString("Raw %1/%2 (paused)").arg(index + 1).arg(count)
+        : QString("Live (%1/128)").arg(count));
+    panelAdvanced->averageStatus->setValue(averageWindow == 1 ? "Off"
+        : QString("%1/%2%3").arg(averageCount).arg(averageWindow).arg(browsing ? " (viewing raw)" : ""));
+    if (browsing)
+        labelInfoPanel->setTriggerLabelText("History (paused)");
+}
+
+void ScopeWindow::setAcquisitionRunning(ScopeTriggerMode mode)
+{
+    const int index = mode == ScopeTriggerMode::TRIG_NORMAL ? 1 :
+                      (mode == ScopeTriggerMode::TRIG_AUTO || mode == ScopeTriggerMode::TRIG_AUTO_FAST ? 2 : 0);
+    panelSet->buttonsTriggerMode->setChecked(true, index);
+    panelSet->buttonsTriggerMode->setText("Stop", 0);
+    panelSet->buttonsTriggerMode->setColor(index == 0 ? Graphics::palette().running : Graphics::palette().warning, 0);
+}
+
 void ScopeWindow::setNumChannels(int channels){
     bool tmp;
     for (int i = 0; i< MAX_SCOPE_CHANNELS; i++) {
@@ -862,8 +917,8 @@ void ScopeWindow::modeChangedCallback(int index) {
             // Restore horizontal cursors to Time mode
             panelCursors->cursorHorADial->updateBaseUnit("s");
             panelCursors->cursorHorBDial->updateBaseUnit("s");
-            panelCursors->cursorHorADial->updateRange(config->timeMin, config->timeMax);
-            panelCursors->cursorHorBDial->updateRange(config->timeMin, config->timeMax);
+            panelCursors->cursorHorADial->updateRange(captureTimeMin, captureTimeMax);
+            panelCursors->cursorHorBDial->updateRange(captureTimeMin, captureTimeMax);
         }
         xyMode = newMode;
     }
@@ -894,5 +949,3 @@ void ScopeWindow::channelYChangedCallback(int index) {
     xyChannelY = index;
     if (xyMode) paintTraces(ChartData, ChartMathData);
 }
-
-

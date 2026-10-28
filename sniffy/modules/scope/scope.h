@@ -13,6 +13,7 @@
 #include "scopeconfig.h"
 #include "scopespec.h"
 #include "fftengine.h"
+#include "capturehistory.h"
 
 
 #include "communication/commands.h"
@@ -26,6 +27,7 @@
 class Scope : public AbstractModule
 {
     Q_OBJECT
+    friend class ScopeTest;
 public:
     explicit Scope(QObject *parent = nullptr);
     ~Scope() override; // custom to ensure orderly shutdown before QObject chain
@@ -62,6 +64,9 @@ public slots:
     void updateFFTConfig(int length, FFTWindow window, FFTType type, int channelIndex);
     void updateFFT();
     void clearMeasurement();
+    void selectHistoryCapture(int index);
+    void resumeLive();
+    void setAverageWindow(int window);
 
 private:
     // Raw pointers below are owned and deleted via QObject parent/child hierarchy
@@ -76,6 +81,14 @@ private:
     FFTengine *FFTCalc = nullptr;            // QObject child (thread)
     QVector<QVector<QPointF>> scopeData;     // value storage (was pointer)
     QString mathExpression;
+    CaptureHistory history;
+    int historyIndex = -1;
+    bool browsingHistory = false;
+    bool samplingActive = false;
+    int displayedSamplingRate = 0;
+    void displayCapture(int index, bool averaged);
+    void updateHistoryControls();
+    void resetAverage();
 
     int FFTlength = 0;
     FFTWindow FFTwindow;

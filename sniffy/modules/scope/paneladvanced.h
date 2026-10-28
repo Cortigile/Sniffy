@@ -3,13 +3,14 @@
 
 #include <QObject>
 #include <QVBoxLayout>
+#include <QSlider>
 
 #include "gui/widgetseparator.h"
 #include "gui/widgetdial.h"
 #include "gui/widgetdialrange.h"
 #include "gui/widgetbuttons.h"
 #include "gui/widgetlabel.h"
-#include "gui/widgetselection.h"
+#include "gui/widgetswitch.h"
 #include "gui/widgettextinput.h"
 
 class PanelAdvanced  : public QObject
@@ -24,6 +25,13 @@ public:
     WidgetTextInput *samplingFrequencyInput;
     WidgetLabel *samplingFrequencyReal;
     WidgetTextInput *dataLengthInput;
+    WidgetLabel *historyPosition;
+    QSlider *historySlider;
+    WidgetButtons *historyButtons;
+    WidgetSwitch *averagingMode;
+    WidgetLabel *averageWindowLabel;
+    QSlider *averageWindow;
+    WidgetLabel *averageStatus;
 };
 
 #endif // PANELADVANCED_H

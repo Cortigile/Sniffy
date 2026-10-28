@@ -1,5 +1,24 @@
 # Regression Tests
 
+## Oscilloscope
+
+Configure with the same Qt/toolchain settings as the application:
+
+```powershell
+cmake -S sniffy -B build-tests -DSNIFFY_BUILD_SCOPE_TESTS=ON
+cmake --build build-tests --target scope_tests
+ctest --test-dir build-tests --output-on-failure -R scope_tests
+```
+
+The Qt, compiler-runtime, libusb, and ST-Link DLL directories must be on `PATH` on
+Windows. Tests run offscreen without a connected board and cover the 128-capture
+limit, raw-data preservation, rolling averages and eviction, sampling/geometry
+resets, complete-frame validation, history navigation, and acquisition pause/resume.
+Frames include the firmware's trailing `S_OK` marker. The default live-acquisition
+test checks startup with averaging off, unaveraged sample values, and the next-capture
+command after each received frame.
+Stable-trigger noise reduction and physical stop/resume timing still need board testing.
+
 ## Voltmeter
 
 Configure with the optional Qt Test target, using the same Qt/toolchain settings as the application:

@@ -556,6 +556,29 @@ V Advanced části je možné nastavovat:
 - pracovní režim včetně XY zobrazení,
 - volbu os X a Y v XY módu.
 
+#### Historie akvizic a průměrování signálu
+
+Záložka **Adv** uchovává v paměti aplikace posledních **128 úplných surových akvizic**.
+Tlačítka **Previous**, **Next** a posuvník historie (nejstarší záznam vlevo) umožňují
+procházet jednotlivé záznamy. Procházení pozastaví akvizici a zobrazí surový signál
+s původní vzorkovací frekvencí a časovou základnou. Měření, math, kurzory a FFT pracují
+se zobrazeným záznamem. **Live** vrátí nejnovější záznam a obnoví aktuální režim triggeru;
+v režimu Single spustí jednu novou akvizici. Data na cestě po pozastavení výběr nepřepíšou.
+
+Přepínač **Averaging: On** zapne průměrování; posuvníkem vyberte **2-128 akvizic**.
+Vybraný počet se zobrazuje nad posuvníkem. Průměrují se odpovídající vzorky posledních akvizic
+pro potlačení náhodného šumu. V režimu Live používají graf, měření, math a FFT tento
+aritmetický průměr. Indikátor Average ukazuje skutečný a požadovaný počet akvizic.
+Historie vždy uchovává a zobrazuje surová data. Použijte stabilní trigger a opakující
+se signál; průměrování nesrovnaných nebo proměnných signálů může rozmazat hrany
+a skrýt ojedinělé události.
+
+Průměrování se resetuje při změně vzorkovací frekvence, délky paměti, rozlišení,
+počtu kanálů, pretriggeru, nastavení triggeru nebo geometrie přijatých dat.
+Historie zůstává dostupná, ale staré záznamy nevstupují do nového průměru.
+Historie ani průměrování se neukládají s layoutem. Velké záznamy zvyšují spotřebu
+paměti; po dosažení limitu se nejstarší záznam zahodí.
+
 ### Typický pracovní postup
 
 1. Otevřete Oscilloscope.

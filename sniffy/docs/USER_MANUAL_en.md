@@ -556,6 +556,30 @@ In the Advanced section, you can configure:
 - working mode including XY display,
 - selection of X and Y axes in XY mode.
 
+#### Acquisition history and signal averaging
+
+The **Adv** tab retains the latest **128 complete raw acquisitions** in desktop memory.
+Use **Previous**, **Next**, or the history slider (oldest on the left) to inspect a capture.
+Browsing pauses acquisition and displays the selected raw waveform, including its original
+sampling rate and time base. Measurements, math, cursors, and FFT operate on the displayed
+capture. **Live** returns to the newest capture and resumes the current trigger mode.
+For Single mode, Live arms one new acquisition. Captures already in transit after pausing
+do not replace the selected history entry.
+
+Set the **Averaging** switch to **On** and use the window slider to choose
+**2-128 captures** to reduce random noise. The selected count is shown above the slider.
+Live waveforms, measurements, math, and FFT use the point-by-point arithmetic mean of the
+most recent compatible captures; the Average indicator shows the actual and requested counts
+while the window fills. History always preserves and displays the raw captures.
+Use a stable trigger and a repetitive signal: averaging unaligned or changing signals can
+blur edges or hide intermittent events.
+
+Averaging resets when sampling frequency, memory length, resolution, channel count,
+pretrigger, or trigger settings change, and when received capture geometry changes.
+Existing history remains available, but captures from before a reset do not enter the new
+average. History and averaging are session-only and are not saved with layouts.
+Large captures increase desktop memory usage; the oldest capture is discarded at the limit.
+
 ### Typical workflow
 
 1. Open Oscilloscope.

@@ -247,6 +247,33 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${EXTRA_LIBS}
 )
 
+option(SNIFFY_BUILD_SCOPE_TESTS "Build oscilloscope regression tests" OFF)
+if(SNIFFY_BUILD_SCOPE_TESTS)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    enable_testing()
+    set(SCOPE_TEST_SOURCES ${CPP_FILES})
+    list(FILTER SCOPE_TEST_SOURCES EXCLUDE REGEX "/main\\.cpp$")
+    add_executable(scope_tests
+        ../tests/scope_test.cpp
+        ${SCOPE_TEST_SOURCES} ${C_FILES} ${UI_FILES} ${HDR_FILES} ${QRC_FILES}
+    )
+    get_target_property(SCOPE_INCLUDES ${PROJECT_NAME} INCLUDE_DIRECTORIES)
+    get_target_property(SCOPE_DEFINITIONS ${PROJECT_NAME} COMPILE_DEFINITIONS)
+    get_target_property(SCOPE_LIBRARIES ${PROJECT_NAME} LINK_LIBRARIES)
+    target_include_directories(scope_tests PRIVATE ${SCOPE_INCLUDES})
+    target_compile_definitions(scope_tests PRIVATE ${SCOPE_DEFINITIONS})
+    target_link_libraries(scope_tests PRIVATE ${SCOPE_LIBRARIES} Qt6::Test)
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(scope_tests PRIVATE -Wa,-mbig-obj)
+    endif()
+    add_test(NAME scope_tests COMMAND scope_tests -platform offscreen -o -,txt)
+    if(TARGET Qt6::QOffscreenIntegrationPlugin)
+        set_tests_properties(scope_tests PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
+        )
+    endif()
+endif()
+
 option(SNIFFY_BUILD_VOLTMETER_TESTS "Build voltmeter regression tests" OFF)
 if(SNIFFY_BUILD_VOLTMETER_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)
