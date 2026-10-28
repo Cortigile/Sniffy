@@ -39,7 +39,9 @@ public:
     explicit VoltmeterWindow(VoltmeterConfig *config, QWidget *parent = nullptr);
     ~VoltmeterWindow();
 
-    void restoreGUIAfterStartup();
+    void restoreGUIAfterStartup(int memoryLimit = 0);
+    void saveSettingsToConfig();
+    void setSamplingMemoryLimit(int bytes);
     void showData(ChannelData data[], int numChannels);
     void showLogicalReading(int logicalIndex, const ChannelData &data,
                             int slot, const QString &inputName, bool advanceTime);
@@ -61,6 +63,7 @@ public:
     int enabledChannelMask() const;
 
 private:
+    friend class VoltmeterTest;
     Ui::VoltmeterWindow *ui;
     VoltmeterConfig *config;
 
@@ -77,6 +80,8 @@ private:
     bool wasMultimode = false;
     QWidget *consolidatedView;
     widgetChart *consolidatedChart;
+    WidgetDialRange *dialConsolidatedHistory;
+    int consolidatedHistorySize = HISTORY_SIZE;
     QList<WidgetLabel *> consolidatedValueLabels;
     QVector<QVector<QPointF>> consolidatedHistory;
     QVector<bool> consolidatedTraceVisible;
@@ -88,6 +93,11 @@ private:
     WidgetButtons *buttonsView;
     WidgetButtons *buttonsAcquisitionMode;
     WidgetButtons *buttonsMode;
+    WidgetButtons *buttonsMainsFrequency;
+    WidgetButtons *buttonsMainsPeriods;
+    WidgetButtons *buttonsSamplingRate;
+    int samplingMemoryLimit = 0;
+    bool restoringSettings = false;
     WidgetLabel *labelVdd;
     WidgetDialRange *dialAveraging;
     WidgetLabel *labelProgress;
@@ -114,9 +124,12 @@ private slots:
     void buttonsCalcsCallback(int clicked);
     void viewCallback(int index);
     void updateConsolidatedChart();
+    void setConsolidatedHistorySize(int size);
+    void clearConsolidatedHistory();
     void selectFileCallback();
     void datalogCallback(int index);
     void modeCallback(int index);
+    void samplingSettingsCallback();
 
 signals:
     void averagingChanged(int value);

@@ -247,6 +247,33 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${EXTRA_LIBS}
 )
 
+option(SNIFFY_BUILD_VOLTMETER_TESTS "Build voltmeter regression tests" OFF)
+if(SNIFFY_BUILD_VOLTMETER_TESTS)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    enable_testing()
+    set(VOLTMETER_TEST_SOURCES ${CPP_FILES})
+    list(FILTER VOLTMETER_TEST_SOURCES EXCLUDE REGEX "/main\\.cpp$")
+    add_executable(voltmeter_tests
+        ../tests/voltmeter_test.cpp
+        ${VOLTMETER_TEST_SOURCES} ${C_FILES} ${UI_FILES} ${HDR_FILES} ${QRC_FILES}
+    )
+    get_target_property(SNIFFY_INCLUDES ${PROJECT_NAME} INCLUDE_DIRECTORIES)
+    get_target_property(SNIFFY_DEFINITIONS ${PROJECT_NAME} COMPILE_DEFINITIONS)
+    get_target_property(SNIFFY_LIBRARIES ${PROJECT_NAME} LINK_LIBRARIES)
+    target_include_directories(voltmeter_tests PRIVATE ${SNIFFY_INCLUDES})
+    target_compile_definitions(voltmeter_tests PRIVATE ${SNIFFY_DEFINITIONS})
+    target_link_libraries(voltmeter_tests PRIVATE ${SNIFFY_LIBRARIES} Qt6::Test)
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(voltmeter_tests PRIVATE -Wa,-mbig-obj)
+    endif()
+    add_test(NAME voltmeter_tests COMMAND voltmeter_tests -platform offscreen -o -,txt)
+    if(TARGET Qt6::QOffscreenIntegrationPlugin)
+        set_tests_properties(voltmeter_tests PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
+        )
+    endif()
+endif()
+
 # Windows GUI app (no console window)
 set_target_properties(${PROJECT_NAME} PROPERTIES
     WIN32_EXECUTABLE TRUE

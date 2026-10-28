@@ -31,9 +31,17 @@ public:
     QString datalogFileName;
     QStringList selectedInputNames[MAX_VOLTMETER_CHANNELS];
     bool hasSavedInputSelections = false;
+    bool hasSavedSettings = false;
+    bool multimode = false;
+    int channelMask = 1;
+    int averaging = 4;
+    int mainsFrequency = 50;
+    int mainsPeriods = 2;
+    int samplingRate = 5000;
 
-    int targetDataLength = 200;
-    VoltmeterMode mode;
+    VoltmeterMode mode = VoltmeterMode::NORMAL;
+    int captureSampleCount() const;
+    int sampleCountForPeriods(int periods) const;
 };
 
 #endif // VOLTMETERCONFIG_H

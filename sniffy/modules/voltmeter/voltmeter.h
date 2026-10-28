@@ -54,6 +54,7 @@ private slots:
     void handleAcquisitionModeChanged(int index);
 
 private:
+    friend class VoltmeterTest;
     VoltmeterConfig *config;
     VoltmeterWindow *voltWindow;
 
@@ -76,7 +77,6 @@ private:
     int activeCaptureSelectors[MAX_VOLTMETER_CHANNELS] = {};
     bool activeCaptureIsMultimode = false;
     bool inputCapabilitiesReceived = false;
-    bool normalInputResetPending = false;
 
     QList<qreal> dataRawVoltage[MAX_VOLTMETER_CHANNELS];
     ChannelData data[MAX_VOLTMETER_CHANNELS];

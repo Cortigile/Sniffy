@@ -68,9 +68,6 @@ void Voltmeter::parseData(QByteArray data)
             voltWindow->setInputCapabilities(spec->availableInputs,
                                              spec->currentInputSelectors,
                                              spec->availableInputSlots);
-            for (int slot = 0; slot < MAX_VOLTMETER_CHANNELS; ++slot)
-                activeCaptureSelectors[slot] = spec->currentInputSelectors[slot];
-            handleInputSelectionChanged();
         } else {
             qWarning() << "Invalid voltmeter input capability response";
         }
@@ -152,15 +149,19 @@ void Voltmeter::writeConfiguration()
     //workaround first data was corrupted on channels > 1
     numChannelsEnabled = static_cast<VoltmeterSpec*>(moduleSpecification)->maxADCChannels;
     comm->write(cmd->SCOPE+":"+cmd->SCOPE_TRIG_CHANNEL+":"+cmd->CHANNELS_1+";");
-    setDefaultSampling();
+    setNumberOfChannels(numChannelsEnabled);
+    comm->write(moduleCommandPrefix+":"+cmd->SCOPE_ADC_CHANNEL_DEAFULT+";");
     comm->write(moduleCommandPrefix + ":" + cmd->GET_SCOPE_INPUTS + ";");
 
-    voltWindow->restoreGUIAfterStartup();
+    voltWindow->restoreGUIAfterStartup(static_cast<VoltmeterSpec*>(moduleSpecification)->memorySize);
+    if (inputCapabilitiesReceived) {
+        VoltmeterSpec *spec = static_cast<VoltmeterSpec*>(moduleSpecification);
+        voltWindow->setInputCapabilities(spec->availableInputs, spec->currentInputSelectors,
+                                         spec->availableInputSlots);
+    }
 
     voltWindow->setPinsAndNumChannels(static_cast<VoltmeterSpec*>(moduleSpecification)->channelPins,static_cast<VoltmeterSpec*>(moduleSpecification)->maxADCChannels);
     setVDDSampling();
-    comm->write(moduleCommandPrefix,cmd->SAMPLING_FREQ,5000);
-    comm->write(cmd->SCOPE,cmd->DATA_LENGTH,200);
     comm->write(cmd->SCOPE+":"+cmd->SCOPE_TRIG_MODE+":"+cmd->MODE_AUTO_FAST+";");
     comm->write(cmd->SCOPE+":"+cmd->SCOPE_DATA_DEPTH+":"+cmd->DATA_DEPTH_12B+";");
 }
@@ -172,6 +173,7 @@ void Voltmeter::parseConfiguration(QByteArray config)
 
 QByteArray Voltmeter::getConfiguration()
 {
+    voltWindow->saveSettingsToConfig();
     return config->serialize();
 }
 
@@ -179,29 +181,18 @@ void Voltmeter::startModule()
 {
     isStartup = true;
     samplesTaken = 0;
-    numChannelsEnabled = static_cast<VoltmeterSpec*>(moduleSpecification)->maxADCChannels;
     for(int i=0;i<MAX_VOLTMETER_CHANNELS;i++){
         dataRawVoltage[i].clear();
     }
-    if (voltWindow->isMultimode() && inputCapabilitiesReceived) {
-        configureMultimodeCapture();
-        for (int slot = 0; slot < numChannelsEnabled; ++slot) {
-            const QList<int> selected = voltWindow->selectedInputIndices(slot);
-            if (!selected.isEmpty())
-                scanPositions[slot] = (scanPositions[slot] + 1) % selected.size();
-        }
-    } else {
-        if (normalInputResetPending) {
-            setDefaultSampling();
-            normalInputResetPending = false;
-        }
-        activeCaptureIsMultimode = false;
-    }
+    for (QList<qreal> &samples : logicalRawVoltage)
+        samples.clear();
+    setVDDSampling();
     startSampling();
 }
 
 void Voltmeter::stopModule()
 {
+    voltWindow->saveSettingsToConfig();
     voltWindow->stopDatalog();
     stopSampling();
 }
@@ -226,11 +217,9 @@ void Voltmeter::updateSamplingChannel(void){
     }else{
         switch (config->mode){
         case VoltmeterMode::NORMAL:
-            config->targetDataLength = 200;
             setVDDSampling();
             break;
         case VoltmeterMode::FAST:
-            config->targetDataLength = 200;
             setDefaultSampling();
             break;
         }
@@ -240,10 +229,17 @@ void Voltmeter::updateSamplingChannel(void){
 void Voltmeter::updateMeasurement(QList<Measurement *> m)
 {
     if(isReferenceMeasured){
-        updateSamplingChannel();
+        if (m.isEmpty() || m.at(0)->getLabel() == "N/A" ||
+            !qIsFinite(m.at(0)->getValue()) || m.at(0)->getValue() <= 0) {
+            qWarning() << "Invalid voltmeter reference measurement; retrying calibration";
+            setVDDSampling();
+            restartSampling();
+            return;
+        }
         qreal VrefReal = static_cast<VoltmeterSpec*>(moduleSpecification)->VrefCalibration / (pow(2,config->ADCresolution)-1) * static_cast<VoltmeterSpec*>(moduleSpecification)->Vref;
         realVdd = VrefReal / m.at(0)->getValue() * static_cast<VoltmeterSpec*>(moduleSpecification)->Vref/1000;
         voltWindow->showVddValue(qreal(int(realVdd))/1000);
+        updateSamplingChannel();
 
     }else{
         samplesTaken++;
@@ -255,6 +251,8 @@ void Voltmeter::updateMeasurement(QList<Measurement *> m)
             voltWindow->showProgress(samplesTaken, calibrationInterval);
             bool advancedHistoryTime = false;
             for (Measurement *meas : m) {
+                if (meas->getLabel() == "N/A")
+                    continue;
                 const int slot = meas->getChannelIndex();
                 if (slot < 0 || slot >= MAX_VOLTMETER_CHANNELS)
                     continue;
@@ -305,7 +303,7 @@ void Voltmeter::updateMeasurement(QList<Measurement *> m)
         } else {
         voltWindow->showProgress(samplesTaken,samplesToTakeTotal);
         for (Measurement* meas : m) {
-            if(meas->getType() == MeasurementType::MEAN){
+            if(meas->getType() == MeasurementType::MEAN && meas->getLabel() != "N/A"){
                 dataRawVoltage[meas->getChannelIndex()].append(meas->getValue()*(realVdd/static_cast<VoltmeterSpec*>(moduleSpecification)->Vref));
             }
         }
@@ -346,12 +344,7 @@ void Voltmeter::updateMeasurement(QList<Measurement *> m)
         }
         }
     }
-    if (normalInputResetPending) {
-        setDefaultSampling();
-        normalInputResetPending = false;
-        activeCaptureIsMultimode = false;
-        restartSampling();
-    } else if (!isReferenceMeasured && voltWindow->isMultimode())
+    if (!isReferenceMeasured && voltWindow->isMultimode())
         applyNextMultimodeCapture();
     else if (!isReferenceMeasured && activeCaptureIsMultimode) {
         setDefaultSampling();
@@ -413,14 +406,19 @@ void Voltmeter::handleInputSelectionChanged()
         if (!activeCaptureIsMultimode)
             activeCaptureSelectors[slot] = currentSelector;
     }
-    numChannelsEnabled = qMax(1, activeSlots);
+    if (voltWindow->isMultimode())
+        numChannelsEnabled = qMax(1, activeSlots);
     notifyActivePinFunctionsChanged();
 }
 
 void Voltmeter::handleAcquisitionModeChanged(int index)
 {
-    if (index == 0)
-        normalInputResetPending = true;
+    Q_UNUSED(index);
+    samplesTaken = 0;
+    for (QList<qreal> &samples : dataRawVoltage)
+        samples.clear();
+    for (QList<qreal> &samples : logicalRawVoltage)
+        samples.clear();
 }
 
 void Voltmeter::rebuildLogicalChannelMap()
@@ -516,6 +514,8 @@ void Voltmeter::configureMultimodeCapture()
     VoltmeterSpec *spec = static_cast<VoltmeterSpec*>(moduleSpecification);
     const int activeSlots = qBound(1, numChannelsEnabled, MAX_VOLTMETER_CHANNELS);
     setNumberOfChannels(activeSlots);
+    comm->write(cmd->SCOPE, cmd->SAMPLING_FREQ, config->samplingRate);
+    comm->write(cmd->SCOPE, cmd->DATA_LENGTH, config->captureSampleCount());
     for (int slot = 0; slot < activeSlots; ++slot) {
         const QList<int> selected = voltWindow->selectedInputIndices(slot);
         int selector = spec->currentInputSelectors[slot];
@@ -625,13 +625,14 @@ void Voltmeter::setNumberOfChannels(int num){
 }
 
 void Voltmeter::setVDDSampling(){
+    setNumberOfChannels(1);
+    comm->write(cmd->SCOPE, cmd->SAMPLING_FREQ, 5000);
     comm->write(moduleCommandPrefix+":"+cmd->SCOPE_ADC_CHANNEL_VREF+";");
     int length = 400 + samplesToTakeTotal*100;
     if(length>2000){
         length = 2000;
     }
     comm->write(cmd->SCOPE,cmd->DATA_LENGTH,length);
-    setNumberOfChannels(1);
     isReferenceMeasured = true;
     activeCaptureIsMultimode = false;
 }
@@ -639,10 +640,10 @@ void Voltmeter::setVDDSampling(){
 void Voltmeter::setDefaultSampling()
 {
     comm->write(moduleCommandPrefix+":"+cmd->SCOPE_ADC_CHANNEL_DEAFULT+";");
-    comm->write(cmd->SCOPE,cmd->DATA_LENGTH,config->targetDataLength);
-    setNumberOfChannels(numChannelsEnabled);
+    setNumberOfChannels(qMax(1, numChannelsEnabled));
+    comm->write(cmd->SCOPE, cmd->SAMPLING_FREQ, config->samplingRate);
+    comm->write(cmd->SCOPE,cmd->DATA_LENGTH,config->captureSampleCount());
 
     isReferenceMeasured = false;
+    activeCaptureIsMultimode = false;
 }
-
-
