@@ -745,15 +745,16 @@ void VoltmeterWindow::appendLogicalDatalog(const ChannelData data[], const QStri
     *logStream << QString::number(logSampleIndex) + "," +
                   now.currentDateTime().toString("dd.MM.yyyy") + "," +
                   now.currentDateTime().toString("hh:mm:ss.zzz") + "," + QString::number(currentVdd);
-    const int columns = qMin(logicalCount, datalogLogicalNames.size());
-    for (int i = 0; i < columns; ++i)
-        *logStream << "," + QString::number(data[i].voltage);
-    for (int i = columns; i < datalogLogicalNames.size(); ++i)
-        *logStream << ",";
+    for (const QString &name : datalogLogicalNames) {
+        const int index = names.indexOf(name);
+        if (index >= 0 && index < logicalCount)
+            *logStream << "," + QString::number(data[index].voltage);
+        else
+            *logStream << ",";
+    }
     *logStream << "\n";
     ++logSampleIndex;
     labelFile->setValue("Logging active (" + QString::number(logSampleIndex) + " smpl)");
-    Q_UNUSED(names);
 }
 
 void VoltmeterWindow::stopDatalog()
