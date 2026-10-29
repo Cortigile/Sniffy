@@ -772,11 +772,11 @@ void VoltmeterWindow::stopDatalog()
         buttonSelectFile->enableAll(true);
         buttonsAcquisitionMode->enableAll(true);
         buttonsAcquisitionMode->setDisabledButton(!hasSelectableInput, 1);
-        buttonsChannelEnable->enableAll(!isMultimode());
-        buttonsView->enableAll(!isMultimode());
+        buttonsChannelEnable->enableAll(true);
+        buttonsView->enableAll(true);
         for (const QList<WidgetButtons *> &rows : inputButtonRows) {
             for (WidgetButtons *row : rows)
-                row->enableAll(isMultimode());
+                row->enableAll(true);
         }
         datalogLogicalNames.clear();
         labelFile->setValue("Log stopped (" + QString::number(logSampleIndex) + " smpl)");
