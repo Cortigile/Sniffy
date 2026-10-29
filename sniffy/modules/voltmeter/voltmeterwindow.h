@@ -39,13 +39,23 @@ public:
     explicit VoltmeterWindow(VoltmeterConfig *config, QWidget *parent = nullptr);
     ~VoltmeterWindow();
 
-    void restoreGUIAfterStartup();
+    void restoreGUIAfterStartup(int memoryLimit = 0);
+    void saveSettingsToConfig();
+    void setSamplingMemoryLimit(int bytes);
     void showData(ChannelData data[], int numChannels);
+    void showLogicalReading(int logicalIndex, const ChannelData &data,
+                            int slot, const QString &inputName, bool advanceTime);
+    void setLogicalInputs(const QStringList &keys, const QStringList &labels);
     void showEmptyCalcs();
     void showVddValue(qreal value);
     void showProgress(int current, int max);
     void setPinsAndNumChannels(QString pins[], int numOfCh);
+    void setInputCapabilities(const QStringList inputs[], const int selectors[], int numSlots);
+    QList<int> selectedInputIndices(int slot) const;
+    QStringList selectedInputNames(int slot) const;
+    bool isMultimode() const;
     void appendDatalog(ChannelData data[], int numChannels);
+    void appendLogicalDatalog(const ChannelData data[], const QStringList &names, int logicalCount);
     void stopDatalog();
     void startDatalog();
     void setDatalogFilePath(const QString &path);
@@ -53,14 +63,41 @@ public:
     int enabledChannelMask() const;
 
 private:
+    friend class VoltmeterTest;
     Ui::VoltmeterWindow *ui;
     VoltmeterConfig *config;
 
     QList<WidgetDisplay *> displays;
+    QWidget *multimodeSelectionWidget;
+    QVBoxLayout *multimodeSelectionLayout;
+    QVector<QStringList> availableInputs;
+    QVector<QList<int>> availableInputSelectors;
+    QVector<QList<WidgetButtons *>> inputButtonRows;
+    QVector<QList<QList<int>>> inputButtonSelectorRows;
+    int availableInputSlots = 0;
+    bool hasSelectableInput = false;
+    int previousViewIndex = 0;
+    bool wasMultimode = false;
+    QWidget *consolidatedView;
+    widgetChart *consolidatedChart;
+    WidgetDialRange *dialConsolidatedHistory;
+    int consolidatedHistorySize = HISTORY_SIZE;
+    QList<WidgetLabel *> consolidatedValueLabels;
+    QVector<QVector<QPointF>> consolidatedHistory;
+    QVector<bool> consolidatedTraceVisible;
+    QStringList logicalInputKeys;
+    qreal consolidatedSampleTime = 0;
 
     widgetTab *tabs;
     WidgetButtons *buttonsChannelEnable;
+    WidgetButtons *buttonsView;
+    WidgetButtons *buttonsAcquisitionMode;
     WidgetButtons *buttonsMode;
+    WidgetButtons *buttonsMainsFrequency;
+    WidgetButtons *buttonsMainsPeriods;
+    WidgetButtons *buttonsSamplingRate;
+    int samplingMemoryLimit = 0;
+    bool restoringSettings = false;
     WidgetLabel *labelVdd;
     WidgetDialRange *dialAveraging;
     WidgetLabel *labelProgress;
@@ -71,6 +108,8 @@ private:
     WidgetButtons *buttonStartLog;
 
     bool isDataLogRunning = false;
+    bool datalogMultimode = false;
+    QStringList datalogLogicalNames;
     qreal currentVdd;
     QFile *logFile;
     int logSampleIndex;
@@ -79,17 +118,26 @@ private:
 
 private slots:
     void channelEnableCallback(int status);
+    void inputSelectionCallback();
+    void acquisitionModeCallback(int index);
     void averagingCallback(int value);
     void buttonsCalcsCallback(int clicked);
+    void viewCallback(int index);
+    void updateConsolidatedChart();
+    void setConsolidatedHistorySize(int size);
+    void clearConsolidatedHistory();
     void selectFileCallback();
     void datalogCallback(int index);
     void modeCallback(int index);
+    void samplingSettingsCallback();
 
 signals:
     void averagingChanged(int value);
     void numChannelsEnabledChanged(int numChEnabled);
     void resetMinMax();
     void modeChanged(int index);
+    void acquisitionModeChanged(int index);
+    void inputSelectionChanged();
 };
 
 #endif // VOLTMETERWINDOW_H

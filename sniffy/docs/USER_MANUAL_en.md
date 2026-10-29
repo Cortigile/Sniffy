@@ -531,6 +531,12 @@ Allows working with cursors in the time and amplitude domains. The following are
 - cursors for the FFT view as well,
 - selection of the cursor type and assigned channel.
 
+After enabling cursors, drag either cursor line directly on the plot with the left
+mouse button. The cursor controls and readings update while dragging. Time/frequency
+cursors move left/right; amplitude cursors move up/down. This also works in FFT and
+XY views, with the selected channel's voltage scale and offset taken into account.
+Drag away from cursor lines to pan as before; mouse-wheel zoom is unchanged.
+
 ### 10.4 Math tab
 
 Math allows two types of work:
@@ -555,6 +561,30 @@ In the Advanced section, you can configure:
 - custom data length,
 - working mode including XY display,
 - selection of X and Y axes in XY mode.
+
+#### Acquisition history and signal averaging
+
+The **Adv** tab retains the latest **128 complete raw acquisitions** in desktop memory.
+Use **Previous**, **Next**, or the history slider (oldest on the left) to inspect a capture.
+Browsing pauses acquisition and displays the selected raw waveform, including its original
+sampling rate and time base. Measurements, math, cursors, and FFT operate on the displayed
+capture. **Live** returns to the newest capture and resumes the current trigger mode.
+For Single mode, Live arms one new acquisition. Captures already in transit after pausing
+do not replace the selected history entry.
+
+Set the **Averaging** switch to **On** and use the window slider to choose
+**2-128 captures** to reduce random noise. The selected count is shown above the slider.
+Live waveforms, measurements, math, and FFT use the point-by-point arithmetic mean of the
+most recent compatible captures; the Average indicator shows the actual and requested counts
+while the window fills. History always preserves and displays the raw captures.
+Use a stable trigger and a repetitive signal: averaging unaligned or changing signals can
+blur edges or hide intermittent events.
+
+Averaging resets when sampling frequency, memory length, resolution, channel count,
+pretrigger, or trigger settings change, and when received capture geometry changes.
+Existing history remains available, but captures from before a reset do not enter the new
+average. History and averaging are session-only and are not saved with layouts.
+Large captures increase desktop memory usage; the oldest capture is discarded at the limit.
 
 ### Typical workflow
 
@@ -627,25 +657,43 @@ Use for measuring the time between two events. You configure:
 
 ## 12. Voltmeter module
 
-The Voltmeter is built on the same acquisition base as the oscilloscope and therefore shares resources with it. The ADC sampling frequency is 5 ksps, the data length is 200 samples, and the channel sampling time is fixed at 40 ms. The displayed value corresponds to the average of the measured signal.
+The Voltmeter is built on the same acquisition base as the oscilloscope and therefore shares resources with it. By default, the ADC samples at 5 ksps over two 50 Hz mains periods (200 samples, 40 ms). The displayed value corresponds to the average of the measured signal.
 
 - It is possible to display the min/max measured values or the voltage ripple and its frequency.
 - Vdd is sampled once every N samples to allow continuous calibration of the measurement.
 - With a higher number of samples for averaging, Vdd is sampled over a longer period and the resulting accuracy is usually better.
-- Vdd sampling can be skipped by turning on the Fast mode.
+- Periodic Vdd sampling can be skipped by turning on the Fast mode. An initial Vdd calibration is always performed, including in Multimode.
 
-The Voltmeter has two tabs: Control and Data log.
+The Voltmeter has three tabs: Control, Data log, and Adv.
 
 ### Control
 
 In the Control section you can:
 
 - turn individual channels on or off,
+- choose Normal sampling or Multimode to scan multiple available inputs per ADC channel,
 - toggle Speed between Normal and Fast,
 - set averaging from 1 to 64 samples,
 - select the display method for supplementary data: Min/Max, Ripple, or None,
 - monitor current Vcc,
 - monitor continuous progress.
+
+Normal channel enables and Multimode input selections are remembered independently when switching modes or reopening the module, and are included in saved sessions.
+
+The Consolidated view has two small icons to the left of the channel labels. Open the history icon to set **History samples**
+from 100 to 1000 or use **Clear history** to clear all consolidated traces and restart the
+sample axis without changing the current readings or the separated displays' histories.
+The history length is included in the saved session layout. These controls also apply in Multimode.
+
+### Adv
+
+- Select the local mains frequency: **50 Hz** (default) or **60 Hz**.
+- Select **1, 2, 4, or 8 periods** per capture; the default is **2**.
+- Select **Slow (5 kHz)** or **Fast (50 kHz)** ADC sampling; the default is Slow.
+
+Period options that exceed the connected board's capture memory are disabled automatically according to the active channels and sampling settings. If the current period count no longer fits, it is reduced to the largest available option.
+
+The sample count is the sampling rate multiplied by the number of periods and divided by the mains frequency, rounded to the nearest sample. This integrates over approximately whole mains periods to reduce mains interference. These settings apply to both Normal and Multimode acquisitions, take effect on the next configured capture, and are saved with the session. They are separate from Control's Speed setting, which controls periodic Vdd recalibration. Reference calibration retains its own 5 kHz sampling.
 
 ### Data log
 

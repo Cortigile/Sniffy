@@ -531,6 +531,12 @@ Umožňuje pracovat s kurzory v časové a amplitudové oblasti. K dispozici jso
 - kurzory i pro FFT pohled,
 - volba typu kurzorů a přiřazeného kanálu.
 
+Po zapnutí kurzorů lze obě čáry přetahovat přímo v grafu levým tlačítkem myši.
+Ovládací prvky a naměřené hodnoty se průběžně aktualizují. Časové/frekvenční
+kurzory se pohybují doleva a doprava, amplitudové nahoru a dolů. Přetahování
+funguje i v FFT a XY pohledu a respektuje napěťové měřítko a posun kanálu.
+Tažení mimo čáry kurzorů nadále posouvá graf; zoom kolečkem zůstává beze změny.
+
 ### 10.4 Záložka Math
 
 Math umožňuje dva typy práce:
@@ -555,6 +561,29 @@ V Advanced části je možné nastavovat:
 - vlastní data length,
 - pracovní režim včetně XY zobrazení,
 - volbu os X a Y v XY módu.
+
+#### Historie akvizic a průměrování signálu
+
+Záložka **Adv** uchovává v paměti aplikace posledních **128 úplných surových akvizic**.
+Tlačítka **Previous**, **Next** a posuvník historie (nejstarší záznam vlevo) umožňují
+procházet jednotlivé záznamy. Procházení pozastaví akvizici a zobrazí surový signál
+s původní vzorkovací frekvencí a časovou základnou. Měření, math, kurzory a FFT pracují
+se zobrazeným záznamem. **Live** vrátí nejnovější záznam a obnoví aktuální režim triggeru;
+v režimu Single spustí jednu novou akvizici. Data na cestě po pozastavení výběr nepřepíšou.
+
+Přepínač **Averaging: On** zapne průměrování; posuvníkem vyberte **2-128 akvizic**.
+Vybraný počet se zobrazuje nad posuvníkem. Průměrují se odpovídající vzorky posledních akvizic
+pro potlačení náhodného šumu. V režimu Live používají graf, měření, math a FFT tento
+aritmetický průměr. Indikátor Average ukazuje skutečný a požadovaný počet akvizic.
+Historie vždy uchovává a zobrazuje surová data. Použijte stabilní trigger a opakující
+se signál; průměrování nesrovnaných nebo proměnných signálů může rozmazat hrany
+a skrýt ojedinělé události.
+
+Průměrování se resetuje při změně vzorkovací frekvence, délky paměti, rozlišení,
+počtu kanálů, pretriggeru, nastavení triggeru nebo geometrie přijatých dat.
+Historie zůstává dostupná, ale staré záznamy nevstupují do nového průměru.
+Historie ani průměrování se neukládají s layoutem. Velké záznamy zvyšují spotřebu
+paměti; po dosažení limitu se nejstarší záznam zahodí.
 
 ### Typický pracovní postup
 
@@ -627,25 +656,43 @@ Použijte pro měření času mezi dvěma událostmi. Nastavujete:
 
 ## 12. Modul Voltmeter
 
-Voltmeter je postavený na stejné akviziční základně jako osciloskop, a proto s ním sdílí prostředky. Vzorkovací frekvence ADC je 5 ksps, délka dat je 200 vzorků a vzorkovací doba kanálu je pevně nastavená na 40 ms. Zobrazená hodnota odpovídá průměru měřeného signálu.
+Voltmeter je postavený na stejné akviziční základně jako osciloskop, a proto s ním sdílí prostředky. Výchozí vzorkovací frekvence ADC je 5 ksps a délka měření odpovídá dvěma periodám sítě 50 Hz (200 vzorků, 40 ms). Zobrazená hodnota odpovídá průměru měřeného signálu.
 
 - Je možné zobrazit min/max naměřené hodnoty nebo zvlnění napětí a jeho frekvenci.
 - Vdd se vzorkuje jednou za N vzorků, aby bylo možné měření průběžně kalibrovat.
 - S vyšším počtem vzorků pro průměrování se Vdd vzorkuje po delší dobu a výsledná přesnost bývá lepší.
-- Vzorkování Vdd lze přeskočit zapnutím rychlého režimu Fast.
+- Průběžné vzorkování Vdd lze přeskočit zapnutím rychlého režimu Fast. Úvodní kalibrace Vdd proběhne vždy, i v režimu Multimode.
 
-Voltmeter má dvě záložky: Control a Data log.
+Voltmeter má tři záložky: Control, Data log a Adv.
 
 ### Control
 
 V Control části můžete:
 
 - zapnout nebo vypnout jednotlivé kanály,
+- zvolit Normal nebo Multimode pro postupné měření více vstupů každého ADC kanálu,
 - přepnout Speed mezi Normal a Fast,
 - nastavit averaging od 1 do 64 vzorků,
 - zvolit způsob zobrazení doplňkových údajů: Min/Max, Ripple nebo None,
 - sledovat aktuální Vcc,
 - sledovat průběžný progress.
+
+Zapnutí kanálů Normal a výběr vstupů Multimode se pamatují nezávisle při přepínání režimu i opětovném otevření modulu a ukládají se do session.
+
+Zobrazení Consolidated má vlevo od popisků kanálů dvě malé ikony. Ikona historie otevře **History samples** pro nastavení
+100 až 1000 vzorků. **Clear history** vymaže všechny společné průběhy a vynuluje osu vzorků,
+ale zachová aktuální hodnoty i historii oddělených displejů. Délka historie se ukládá do
+rozložení session. Ovládání funguje také v Multimode.
+
+### Adv
+
+- Síťová frekvence: **50 Hz** (výchozí) nebo **60 Hz**.
+- Délka měření: **1, 2, 4 nebo 8 period**, výchozí jsou **2**.
+- Vzorkování ADC: **Slow (5 kHz)** nebo **Fast (50 kHz)**, výchozí je Slow.
+
+Počty period, které překračují paměť připojené desky, se automaticky znepřístupní podle aktivních kanálů a nastavení vzorkování. Pokud se aktuální počet period již nevejde, sníží se na nejvyšší dostupnou možnost.
+
+Počet vzorků je vzorkovací frekvence krát počet period děleno síťovou frekvencí, zaokrouhlený na nejbližší vzorek. Měření přes přibližně celé periody potlačuje síťové rušení. Nastavení platí pro Normal i Multimode, použije se při příští konfiguraci měření a ukládá se do session. Nezávisí na volbě Speed v Control, která řídí průběžnou kalibraci Vdd. Kalibrace reference používá vlastní vzorkování 5 kHz.
 
 ### Data log
 

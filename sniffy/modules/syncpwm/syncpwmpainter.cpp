@@ -10,7 +10,7 @@ SyncPwmPainter::SyncPwmPainter(widgetChart *chart, SyncPwmConfig *config, QObjec
 void SyncPwmPainter::repaint(){
     recalculate();
     chart->clearAll();
-    for(int i = 0; i < CHANNELS_NUM; i++){
+    for(int i = 0; i < channelCount; i++){
         QVector<QPointF> vector = points->at(i);
         chart->updateTrace(&vector, i);
     }
@@ -22,7 +22,7 @@ void SyncPwmPainter::recalculate(){
     qreal timScale = setTimeScale();
     qreal yLog0, yLog1, sumPer, chPer;
 
-    for(int i = 0; i < CHANNELS_NUM; i++){
+    for(int i = 0; i < channelCount; i++){
 
         if(config->chan[i].inverted){
             yLog1 = RANGE_CHAN1_LOG0 - i * 3;
@@ -92,9 +92,14 @@ void SyncPwmPainter::enableChannel(bool enable, int chanIndex){
     repaint();
 }
 
+void SyncPwmPainter::setActiveChannelCount(int count){
+    channelCount = qBound(1, count, CHANNELS_NUM);
+    repaint();
+}
+
 qreal SyncPwmPainter::setTimeScale(){
     freq = config->chan[0].freq;
-    for(int i = 1; i < CHANNELS_NUM; i++)
+    for(int i = 1; i < channelCount; i++)
         if(config->chan[i].freq < freq)
             freq = config->chan[i].freq;
 

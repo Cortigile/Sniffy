@@ -21,6 +21,7 @@ public:
     explicit SyncPwmSettings(QVBoxLayout *destination, SyncPwmConfig *config, QWidget *parent = nullptr);
 
     WidgetSeparator *separator[CHANNELS_NUM];    
+    QWidget *channelPanels[CHANNELS_NUM];
 
     WidgetButtons *buttonStart;
     WidgetButtons *buttonEquidist;
@@ -34,6 +35,7 @@ public:
     WidgetDialRange *dialPhaseCh[CHANNELS_NUM];
 
     void setSpecification(SyncPwmSpec *spec);
+    void setActiveChannelCount(int count);
 
     void configControlElements(QWidget *parent, int i, int phase);
     void greyOutComplementChanFreqDials(int chanIndex);

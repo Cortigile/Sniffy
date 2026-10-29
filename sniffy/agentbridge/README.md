@@ -231,7 +231,14 @@ instead of advertising tools that would only fail later with `Unknown method`.
 | `voltmeter_set_averaging` | `{module, value}` | Averaging samples (1–64) |
 | `voltmeter_set_calc_mode` | `{module, mode}` | 0=Min/Max, 1=Ripple, 2=None |
 | `voltmeter_set_channels` | `{module, channel_mask}` | Enable channels by bitmask |
-| `voltmeter_get_readings` | `{module}` | Live readings (voltage, min, max, ripple, freq) |
+| `voltmeter_get_readings` | `{module}` | Live physical-channel `readings` plus identity-bearing `logical_readings` (`slot`, `input`, voltage, min, max, ripple, frequency, percent) in Multimode |
+
+Voltmeter entries in `get_system_config` include `available_inputs` after the
+firmware `INP?` response has been received. Each entry identifies a 1-based
+physical `slot`, its firmware `selected_index`, and the ordered candidate
+`inputs`. Voltmeter module state adds `acquisition_mode` (`0` Normal, `1`
+Multimode); `logical_readings` is additive, so existing physical-channel
+`readings` retain their previous shape.
 | `voltmeter_set_datalog_file` | `{module, path}` | Set data log file path |
 | `voltmeter_start_datalog` | `{module}` | Start data logging |
 | `voltmeter_stop_datalog` | `{module}` | Stop data logging |

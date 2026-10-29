@@ -30,6 +30,7 @@
 
 // Lightweight FFT enum definitions (avoid including full fftengine in header)
 #include "fftdefs.h"
+#include "capturehistory.h"
 
 // Forward declarations to keep header light
 class widgetChart;
@@ -45,6 +46,7 @@ class WidgetButtons;
 class WidgetDial;
 class WidgetDialRange;
 class WidgetTextInput;
+enum class Cursor;
 
 #include <QVector>
 #include <QPointF>
@@ -82,6 +84,9 @@ public:
     void updateFFTchart(QVector<QPointF> fftTrace, qreal maxFreq);
     void mathError(int errorPosition);
     void restoreGUIAfterStartup();
+    void setCaptureMetadata(const ScopeCapture &capture);
+    void setHistoryState(int count, int index, bool browsing, int averageCount, int averageWindow);
+    void setAcquisitionRunning(ScopeTriggerMode mode);
 
 
 signals:
@@ -101,6 +106,9 @@ signals:
     void measurementClearChanged();
     void verticalChanged();
     void resolutionChanged(int resolution);
+    void historyCaptureSelected(int index);
+    void liveRequested();
+    void averageWindowChanged(int window);
 
 
 private slots:
@@ -141,6 +149,7 @@ private slots:
     void updateCursorReadings();
     void setHorizontalCursors(int channelIndex);
     void setVerticalCursors(int channelIndex);
+    void cursorDragged(bool fft, bool horizontal, Cursor cursor, qreal value);
 
 
 public:
@@ -182,6 +191,10 @@ private:
 
     QVector<QVector<QPointF>> ChartData;
     QVector<QPointF> ChartMathData;
+    ScopeCapture displayedCapture;
+    bool historyBrowsing = false;
+    qreal captureTimeMin = -0.01;
+    qreal captureTimeMax = 0.01;
 
     bool xyMode = false;
     int xyChannelX = 0;

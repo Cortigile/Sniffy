@@ -44,6 +44,41 @@ PanelAdvanced::PanelAdvanced(QVBoxLayout *destination, QWidget *parent)
     dataLengthInput->setObjectName(QStringLiteral("scopeDataLength"));
     destination->addWidget(dataLengthInput);
 
+    destination->addWidget(new WidgetSeparator(parent,"Acquisition history"));
+    historyPosition = new WidgetLabel(parent, "Capture", "Live (0/128)");
+    destination->addWidget(historyPosition);
+    historySlider = new QSlider(Qt::Horizontal, parent);
+    historySlider->setObjectName("scopeHistorySlider");
+    historySlider->setRange(0, 0);
+    historySlider->setEnabled(false);
+    historySlider->setToolTip("Oldest to newest raw capture. Selecting a capture pauses acquisition.");
+    destination->addWidget(historySlider);
+    historyButtons = new WidgetButtons(parent, 3, ButtonTypes::NORMAL);
+    historyButtons->setObjectName("scopeHistoryButtons");
+    historyButtons->setText("Previous", 0);
+    historyButtons->setText("Next", 1);
+    historyButtons->setText("Live", 2);
+    destination->addWidget(historyButtons);
+    historyButtons->setDisabledButton(true, 0);
+    historyButtons->setDisabledButton(true, 1);
+
+    destination->addWidget(new WidgetSeparator(parent,"Signal averaging"));
+    averagingMode = new WidgetSwitch(parent, "Off", "On", "Averaging");
+    // Session-only: restoring widget geometry must not silently enable averaging.
+    averagingMode->setObjectName(QString());
+    destination->addWidget(averagingMode);
+    averageWindowLabel = new WidgetLabel(parent, "Window", "16 captures");
+    destination->addWidget(averageWindowLabel);
+    averageWindow = new QSlider(Qt::Horizontal, parent);
+    averageWindow->setObjectName("scopeAverageWindow");
+    averageWindow->setRange(2, 128);
+    averageWindow->setValue(16);
+    averageWindow->setEnabled(false);
+    averageWindow->setToolTip("Average corresponding samples of the latest compatible captures. Use a stable trigger.");
+    destination->addWidget(averageWindow);
+    averageStatus = new WidgetLabel(parent, "Average", "Off");
+    destination->addWidget(averageStatus);
+
     QSpacerItem *verticalSpacer;
     verticalSpacer = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
     destination->addItem(verticalSpacer);

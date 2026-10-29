@@ -32,6 +32,9 @@ Scope::Scope(QObject *parent) : AbstractModule(parent)
     connect(scpWindow, &ScopeWindow::samlingFrequecyCustomInputChanged,this,&Scope::updateCustomSamplingFreq);
 
     connect(scpWindow, &ScopeWindow::resolutionChanged,this,&Scope::updateResolution);
+    connect(scpWindow, &ScopeWindow::historyCaptureSelected, this, &Scope::selectHistoryCapture);
+    connect(scpWindow, &ScopeWindow::liveRequested, this, &Scope::resumeLive);
+    connect(scpWindow, &ScopeWindow::averageWindowChanged, this, &Scope::setAverageWindow);
 
     connect(scpWindow, &ScopeWindow::measurementChanged,this, &Scope::addMeasurement);
     connect(scpWindow, &ScopeWindow::measurementClearChanged, this, &Scope::clearMeasurement);
@@ -60,126 +63,44 @@ void Scope::parseData(QByteArray data){
         buildModuleDescription(specification);
 
     }else if(dataHeader==Commands::SAMPLING){
-        if(config->triggerMode!=ScopeTriggerMode::TRIG_STOP){
+        if(samplingActive && !browsingHistory){
             scpWindow->samplingOngoing();
         }
     }else if(dataHeader==Commands::TRIGGERED){
-        scpWindow->triggerCaptured();
+        if (samplingActive && !browsingHistory)
+            scpWindow->triggerCaptured();
 
     }else if(dataHeader==Commands::SCOPE_INCOME){
-        quint8 tmpByte;
-        quint16 tmpShort;
-        qreal minX = 0;
-        qreal maxX = 0.1;
-        qreal x(0);
-        qreal y(0);
-        int resolution;
-        int length, samples;
-        int samplingFreq;
-        int currentChannel=0;
-        int numChannels=1;
-
-        QDataStream streamBuffLeng(data);
-
-        // Basic sanity: ensure we have at least header + minimal payload for one channel
-        if (data.size() < 32) {
-            qWarning() << "OSC_ frame too short" << data.size();
+        // A frame already in transit after Stop must not replace a historical selection.
+        if (!samplingActive || browsingHistory)
+            return;
+        QString error;
+        auto capture = ScopeCapture::decode(data, config->pretriggerPercent, error);
+        if (!capture) {
+            qWarning() << "[Scope][parseData]" << error;
             return;
         }
-
-        while (numChannels>currentChannel){
-            streamBuffLeng>>samplingFreq;
-            streamBuffLeng>>samplingFreq;
-            config->realSamplingRate = samplingFreq;
-            streamBuffLeng>>tmpByte;
-            resolution = tmpByte;
-            config->ADCresolution = resolution;
-            streamBuffLeng>>length;
-            samples = resolution>8?length/2:length;
-            streamBuffLeng>>tmpShort;
-            config->rangeMin = (qint16)tmpShort;
-            streamBuffLeng>>tmpShort;
-            config->rangeMax = (qint16)tmpShort;
-
-            streamBuffLeng>>tmpByte;
-            streamBuffLeng>>tmpByte;
-            currentChannel = tmpByte;
-            streamBuffLeng>>tmpByte;
-            numChannels = tmpByte;
-            config->numberOfChannels = numChannels;
-            config->numberOfChannelsReceived = numChannels;
-
-            QVector<QPointF> points;
-            if(length <= 0){
-                qWarning() << "Invalid length in OSC_ frame" << length;
-                return; // abort parsing whole frame
-            }
-            if(length > 500000){
-                qWarning() << "Too long signal length rejected" << length;
-                return;
-            }
-            points.reserve(length);
-
-            if(resolution>8){
-                minX = float(samples)*1.0/samplingFreq * ((100.0-config->pretriggerPercent)/100.0 - 1);
-                config->timeMin = minX;
-                for (int j(0); j < length/2; j++){
-                    if(streamBuffLeng.atEnd()) { qWarning() << "Unexpected end of data (16-bit path)"; break; }
-                    streamBuffLeng>>tmpByte;
-                    tmpShort = tmpByte;
-                    streamBuffLeng>>tmpByte;
-                    tmpShort += tmpByte*256;
-                    x=j*1.0/samplingFreq + minX;
-                    y=(tmpShort*(float)(config->rangeMax-config->rangeMin)/(pow(2,config->ADCresolution)-1)+config->rangeMin)/1000;
-                    points.append(QPointF(x,y));
-                }
-                maxX = x;
-                config->timeMax = maxX;
-            }else{
-                minX = float(samples)*1.0/samplingFreq * ((100.0-config->pretriggerPercent)/100.0 - 1);
-                config->timeMin = minX;
-                for (int j(0); j < length; j++){
-                    if(streamBuffLeng.atEnd()) { qWarning() << "Unexpected end of data (8-bit path)"; break; }
-                    streamBuffLeng>>tmpByte;
-                    tmpShort = tmpByte;
-                    x=j*1.0/samplingFreq + minX;
-                    y=(tmpShort*(float)(config->rangeMax-config->rangeMin)/(pow(2,config->ADCresolution)-1)+config->rangeMin)/1000;
-                    points.append(QPointF(x,y));
-                }
-                maxX = x;
-                config->timeMax = maxX;
-            }
-
-            while(numChannels<scopeData.length()){ //remove signals which will not be filled
-                scopeData.removeAt(scopeData.length()-1);
-            }
-            if(scopeData.length()>=currentChannel){
-                scopeData.replace(currentChannel-1,points);
-            }else{
-                scopeData.append(points);
-            }
-        }
-
-        if(currentChannel==numChannels){
-            measCalc->calculate(scopeData,config->scopeMeasList,config->realSamplingRate);
-            mathCalc->calculate(scopeData,config->realSamplingRate,mathExpression);
-            if(FFTlength !=0 && numChannels>FFTChannelIndex){
-                FFTCalc->calculate(scopeData.at(FFTChannelIndex),FFTwindow,FFTtype,FFTlength,true,config->realSamplingRate);
-            }
-            scpWindow->showDataTraces(scopeData,config->timeBase, config->triggerChannelIndex);
-
-            qreal zoomMultSampling = float(config->requestedSamplingRate)/config->realSamplingRate;//signal sometimes need to be zoomed to show correct value V/div
-            qreal zoomMultLength = (float)samples/config->dataLength;
-            scpWindow->setDataMinMaxTimeAndZoom(minX,maxX,zoomMultSampling*zoomMultLength*timeAndMemoryHandle->getZoom());
-            scpWindow->setRealSamplingRateAndLlength(samplingFreq,samples);
-
-            //handle single trigger
-            if(config->triggerMode!=ScopeTriggerMode::TRIG_SINGLE){
-                restartSampling();
-            }else{
-                scpWindow->singleSamplingDone();
-                setModuleStatus(ModuleStatus::PAUSE);
-            }
+        config->realSamplingRate = capture->samplingRate;
+        config->ADCresolution = capture->resolution;
+        config->numberOfChannelsReceived = capture->channels.size();
+        config->rangeMin = capture->rangeMin;
+        config->rangeMax = capture->rangeMax;
+        config->timeMin = capture->channels.first().first().x();
+        config->timeMax = capture->channels.first().last().x();
+        capture->timeBase = config->timeBase;
+        capture->triggerChannel = config->triggerChannelIndex;
+        capture->triggerLevel = config->triggerLevel;
+        capture->zoom = qreal(config->requestedSamplingRate) / capture->samplingRate *
+                        qreal(capture->channels.first().size()) / config->dataLength *
+                        timeAndMemoryHandle->getZoom();
+        history.append(std::move(*capture));
+        displayCapture(history.size() - 1, true);
+        if(config->triggerMode!=ScopeTriggerMode::TRIG_SINGLE){
+            restartSampling();
+        }else{
+            samplingActive = false;
+            scpWindow->singleSamplingDone();
+            setModuleStatus(ModuleStatus::PAUSE);
         }
     }else{
         qWarning() << "[Scope][parseData] Unknown data header" << dataHeader;
@@ -226,12 +147,83 @@ void Scope::stopModule(){
     FFTCalc->exit();
 }
 void Scope::startModule(){
-    if(config->triggerMode != ScopeTriggerMode::TRIG_STOP)
+    if (browsingHistory)
+        resumeLive();
+    else if(config->triggerMode != ScopeTriggerMode::TRIG_STOP)
         startSampling();
 }
 
 QWidget* Scope::getWidget(){
     return scpWindow;
+}
+
+void Scope::updateHistoryControls()
+{
+    scpWindow->setHistoryState(history.size(), historyIndex, browsingHistory,
+                              history.averageCount(), history.averageWindow());
+}
+
+void Scope::displayCapture(int index, bool averaged)
+{
+    if (index < 0 || index >= history.size()) {
+        qWarning() << "[Scope] Invalid history index" << index;
+        return;
+    }
+    historyIndex = index;
+    const auto &capture = history.at(index);
+    displayedSamplingRate = capture.samplingRate;
+    scopeData = averaged ? history.liveData() : capture.channels;
+    scpWindow->setCaptureMetadata(capture);
+    updateHistoryControls();
+    scpWindow->showDataTraces(scopeData, capture.timeBase, capture.triggerChannel);
+    scpWindow->setDataMinMaxTimeAndZoom(capture.channels.first().first().x(),
+                                      capture.channels.first().last().x(), capture.zoom);
+    measCalc->calculate(scopeData, config->scopeMeasList, displayedSamplingRate);
+    mathCalc->calculate(scopeData, displayedSamplingRate, mathExpression);
+    if (FFTlength != 0 && FFTChannelIndex >= 0 && FFTChannelIndex < scopeData.size())
+        FFTCalc->calculate(scopeData.at(FFTChannelIndex), FFTwindow, FFTtype, FFTlength, true, displayedSamplingRate);
+    else if (FFTlength != 0)
+        scpWindow->updateFFTchart({}, displayedSamplingRate / 2.0);
+    updateHistoryControls();
+}
+
+void Scope::selectHistoryCapture(int index)
+{
+    if (index < 0 || index >= history.size()) {
+        qWarning() << "[Scope] Invalid history selection" << index;
+        return;
+    }
+    browsingHistory = true;
+    stopSampling();
+    scpWindow->singleSamplingDone();
+    displayCapture(index, false);
+}
+
+void Scope::resumeLive()
+{
+    browsingHistory = false;
+    if (history.size() > 0)
+        displayCapture(history.size() - 1, true);
+    if (config->triggerMode == ScopeTriggerMode::TRIG_STOP)
+        config->triggerMode = ScopeTriggerMode::TRIG_SINGLE;
+    scpWindow->setAcquisitionRunning(config->triggerMode);
+    setTriggerMode(config->triggerMode);
+    startSampling();
+    updateHistoryControls();
+}
+
+void Scope::setAverageWindow(int window)
+{
+    history.setAverageWindow(window);
+    if (!browsingHistory && history.size() > 0)
+        displayCapture(history.size() - 1, true);
+    updateHistoryControls();
+}
+
+void Scope::resetAverage()
+{
+    history.resetAverage();
+    updateHistoryControls();
 }
 
 void Scope::updateTimebase(float div){
@@ -244,34 +236,47 @@ void Scope::updateCustomSamplingFreq(int freq)
 }
 
 void Scope::updatePretrigger(float percentage){
+    if (config->pretriggerPercent != percentage)
+        resetAverage();
     config->pretriggerPercent=percentage;
     config->pretrigger = 65535*percentage/100;
     comm->write(cmd->SCOPE, cmd->SCOPE_PRETRIGGER, config->pretrigger);
 }
 
 void Scope::updateTriggerLevel(float percentage){
+    if (config->triggerLevelPercent != percentage)
+        resetAverage();
     config->triggerLevelPercent=percentage;
     config->triggerLevel = 65535*percentage/100;
     comm->write(cmd->SCOPE, cmd->SCOPE_TRIG_LEVEL, config->triggerLevel);
 }
 
 void Scope::updateTriggerMode(ScopeTriggerMode mode){
+    if (config->triggerMode != mode)
+        resetAverage();
     config->triggerMode=mode;
     setTriggerMode(mode);
 
     if(mode==ScopeTriggerMode::TRIG_STOP){
         stopSampling();
     }else{
+        browsingHistory = false;
+        if (history.size() > 0)
+            displayCapture(history.size() - 1, true);
         startSampling();
     }
 }
 
 void Scope::updateTriggerEdge(ScopeTriggerEdge edge){
+    if (config->triggerEdge != edge)
+        resetAverage();
     setTriggerEdge(edge);
     config->triggerEdge=edge;
 }
 
 void Scope::updateTriggerChannel(int index){
+    if (config->triggerChannelIndex != index)
+        resetAverage();
     config->triggerChannelIndex=index;
     setTriggerChannel(index);
 }
@@ -290,7 +295,8 @@ void Scope::updateResolution(int resolution)
 }
 
 void Scope::updateChannelsEnable(int buttonStatus){
-    scpWindow->showDataTraces(scopeData,config->timeBase,config->triggerChannelIndex);
+    if (history.size() > 0)
+        displayCapture(historyIndex, !browsingHistory);
     timeAndMemoryHandle->setNumOfChannels(fmax(log2(buttonStatus),0)+1);
     notifyActivePinFunctionsChanged();
 }
@@ -301,7 +307,7 @@ void Scope::addMeasurement(Measurement *m){
         config->scopeMeasList.removeFirst();
     }
     config->measCount= config->scopeMeasList.length();
-    measCalc->calculate(scopeData,config->scopeMeasList,config->realSamplingRate);
+    measCalc->calculate(scopeData,config->scopeMeasList,displayedSamplingRate);
 }
 
 void Scope::clearMeasurement(){
@@ -368,7 +374,7 @@ void Scope::updateMath(int errorPosition)
 void Scope::updateMathExpression(QString exp)
 {
     mathExpression = exp;
-    mathCalc->calculate(scopeData,config->realSamplingRate,mathExpression);
+    mathCalc->calculate(scopeData,displayedSamplingRate,mathExpression);
 }
 
 void Scope::updateFFTConfig(int length, FFTWindow window, FFTType type, int channelIndex)
@@ -378,8 +384,8 @@ void Scope::updateFFTConfig(int length, FFTWindow window, FFTType type, int chan
     FFTtype = type;
     FFTChannelIndex = channelIndex;
 
-    if(FFTlength !=0 && config->numberOfChannelsReceived>FFTChannelIndex){
-    FFTCalc->calculate(scopeData.at(FFTChannelIndex),FFTwindow,FFTtype,FFTlength,true,config->realSamplingRate);
+    if(FFTlength !=0 && FFTChannelIndex >= 0 && scopeData.size()>FFTChannelIndex){
+    FFTCalc->calculate(scopeData.at(FFTChannelIndex),FFTwindow,FFTtype,FFTlength,true,displayedSamplingRate);
     }
 }
 
@@ -389,11 +395,13 @@ void Scope::updateFFT()
 }
 
 void Scope::stopSampling(){
+    samplingActive = false;
     comm->write(cmd->SCOPE+":"+cmd->STOP+";");
     setModuleStatus(ModuleStatus::PAUSE);
 }
 
 void Scope::startSampling(){
+    samplingActive = true;
     comm->write(cmd->SCOPE+":"+cmd->START+";");
     if(config->triggerMode == ScopeTriggerMode::TRIG_SINGLE)
         setModuleStatus(ModuleStatus::WAIT_EVENT);
@@ -407,6 +415,7 @@ void Scope::restartSampling(){
 }
 
 void Scope::setNumberOfChannels(int num){
+    resetAverage();
     switch (num){
     case 1:
         comm->write(cmd->SCOPE, cmd->CHANNELS, cmd->CHANNELS_1);
@@ -425,6 +434,7 @@ void Scope::setNumberOfChannels(int num){
 
 void Scope::setResolution(int res)
 {
+    resetAverage();
     if(res==8){
         comm->write(cmd->SCOPE+":"+cmd->SCOPE_DATA_DEPTH+":"+cmd->DATA_DEPTH_8B+";");
     }else{
@@ -480,9 +490,11 @@ void Scope::setTriggerEdge(ScopeTriggerEdge edge){
 }
 
 void Scope::setSamplingFrequency(int samplingRate){
+    resetAverage();
     comm->write(cmd->SCOPE,cmd->SAMPLING_FREQ,samplingRate);
 }
 
 void Scope::setDataLength(int dataLength){
+    resetAverage();
     comm->write(cmd->SCOPE,cmd->DATA_LENGTH,dataLength);
 }

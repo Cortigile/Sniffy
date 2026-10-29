@@ -73,7 +73,7 @@ void SyncPwm::writeConfiguration(){
         switchStepModeCallback(0);
     }
 
-    for(int ch = 0; ch < CHANNELS_NUM; ch++){
+    for(int ch = 0; ch < spwmWindow->activeChannelCount(); ch++){
         setFreq(config->chan[ch].freq, ch);
         setDuty(config->chan[ch].duty, ch);
         setInvert(ch);
@@ -154,7 +154,7 @@ void SyncPwm::equiModeConfig(){
 }
 
 void SyncPwm::equiModeSetFreq(float val){
-    for(int ch = 1; ch < CHANNELS_NUM; ch++){
+    for(int ch = 1; ch < spwmWindow->activeChannelCount(); ch++){
         setFreq(val, ch);
         spwmWindow->setFreqDial(val, ch);
     }
@@ -164,7 +164,7 @@ void SyncPwm::equiModeSetFreq(float val){
 }
 
 void SyncPwm::equiModeSetPhase(float val){
-    for(int ch = 1; ch < CHANNELS_NUM; ch++){
+    for(int ch = 1; ch < spwmWindow->activeChannelCount(); ch++){
         setPhase(val*(ch+1), ch);
         spwmWindow->setPhaseDial(val*(ch+1), ch);
     }
@@ -174,7 +174,7 @@ void SyncPwm::equiModeSetPhase(float val){
 }
 
 void SyncPwm::equiModeSetDuty(float val){
-    for(int ch = 1; ch < CHANNELS_NUM; ch++){
+    for(int ch = 1; ch < spwmWindow->activeChannelCount(); ch++){
         setDuty(val, ch);
         spwmWindow->setDutyDial(val, ch);
     }
@@ -198,14 +198,15 @@ void SyncPwm::buildModuleDescription(SyncPwmSpec *spec)
     QList<QString> labels ,values;
 
     labels.append("Num Channels");
-    values.append(QString::number(spec->chan_num));
+    const int channelCount = spec->activeChannelCount();
+    values.append(QString::number(channelCount));
 
     labels.append("Max frequency");
     values.append(LabelFormator::formatOutout(spec->max_freq,"Hz",1));
 
     labels.append("Pins");
     QString pins;
-    for(int i = 0;i<spec->chan_num;i++){
+    for(int i = 0; i < channelCount; i++){
         pins += spec->pinsList[i] + ", ";
     }
     values.append(pins.left(pins.length()-2));
@@ -214,7 +215,7 @@ void SyncPwm::buildModuleDescription(SyncPwmSpec *spec)
 
     // Pinout overlay
     QList<PinFunctionInfo> pinFuncs;
-    for(int i = 0; i < spec->chan_num && i < spec->pinsList.size(); i++){
+    for(int i = 0; i < channelCount && i < spec->pinsList.size(); i++){
         const QString &pin = spec->pinsList.at(i);
         if(!pin.isEmpty() && pin != "-"){
             pinFuncs.append({pin, "CH" + QString::number(i + 1), "syncpwm"});
