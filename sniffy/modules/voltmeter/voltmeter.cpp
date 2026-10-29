@@ -241,7 +241,7 @@ void Voltmeter::updateMeasurement(QList<Measurement *> m)
         voltWindow->showVddValue(qreal(int(realVdd))/1000);
         updateSamplingChannel();
 
-    }else{
+    }else if (activeCaptureIsMultimode == voltWindow->isMultimode()) {
         samplesTaken++;
         if (activeCaptureIsMultimode) {
             int maxScanLength = 1;

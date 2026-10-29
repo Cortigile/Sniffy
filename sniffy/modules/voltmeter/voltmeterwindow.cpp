@@ -528,6 +528,8 @@ void VoltmeterWindow::inputSelectionCallback()
 void VoltmeterWindow::acquisitionModeCallback(int index)
 {
     const bool multimode = index == 1;
+    if (multimode != wasMultimode)
+        clearConsolidatedHistory();
     if (multimode && !wasMultimode) {
         const int selectedView = buttonsView->getSelectedIndex();
         if (selectedView >= 0)

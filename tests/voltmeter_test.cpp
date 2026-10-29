@@ -132,6 +132,89 @@ private slots:
         QVERIFY(window.consolidatedTraceVisible[1]);
     }
 
+    void consolidatedHistoryClearsAcrossAcquisitionModes()
+    {
+        VoltmeterConfig config;
+        VoltmeterWindow window(&config);
+        window.restoreGUIAfterStartup();
+        QStringList inputs[MAX_VOLTMETER_CHANNELS] = {{"PA0", "PA1"}};
+        int selectors[MAX_VOLTMETER_CHANNELS] = {};
+        window.setInputCapabilities(inputs, selectors, 1);
+        buttons(window, "ChannelvoltmeterEnable")->restoreGeometry("3");
+
+        ChannelData readings[MAX_VOLTMETER_CHANNELS];
+        readings[0].voltage = 1.5;
+        readings[1].voltage = 2.5;
+        window.showData(readings, 2);
+        QVERIFY(!window.consolidatedHistory[0].isEmpty());
+        QVERIFY(!window.consolidatedHistory[1].isEmpty());
+
+        click(buttons(window, "voltmeterAcquisitionMode"), 1);
+        for (const auto &history : window.consolidatedHistory)
+            QVERIFY(history.isEmpty());
+
+        window.showLogicalReading(1, readings[1], 0, "PA1", true);
+        QVERIFY(!window.consolidatedHistory[1].isEmpty());
+        click(buttons(window, "voltmeterAcquisitionMode"), 0);
+        for (const auto &history : window.consolidatedHistory)
+            QVERIFY(history.isEmpty());
+    }
+
+    void pendingCaptureDoesNotCrossAcquisitionModes()
+    {
+        Comms communication;
+        QObject::disconnect(&communication, &Comms::dataWrite, nullptr, nullptr);
+        WidgetControlModule control;
+        control.setStatus(ModuleStatus::STOP);
+        Voltmeter module;
+        module.comm = &communication;
+        Commands commands;
+        module.cmd = &commands;
+        ModuleDockWidget dock;
+        module.setDockWidgetWindow(&dock);
+        module.setModuleControlWidget(&control);
+
+        auto *spec = static_cast<VoltmeterSpec *>(module.getSpecification());
+        spec->availableInputs[0] = {"PA0"};
+        spec->availableInputSlots = 1;
+        module.inputCapabilitiesReceived = true;
+        module.voltWindow->setInputCapabilities(spec->availableInputs,
+                                                spec->currentInputSelectors, 1);
+        click(buttons(*module.voltWindow, "voltmeterAcquisitionMode"), 1);
+        ChannelData reading;
+        reading.voltage = 1.5;
+        module.voltWindow->showLogicalReading(0, reading, 0, "PA0", true);
+        QVERIFY(!module.voltWindow->consolidatedHistory[0].isEmpty());
+
+        module.samplesToTakeTotal = 1;
+        module.isReferenceMeasured = false;
+        module.activeCaptureIsMultimode = true;
+        click(buttons(*module.voltWindow, "voltmeterAcquisitionMode"), 0);
+        QVERIFY(module.voltWindow->consolidatedHistory[0].isEmpty());
+
+        Measurement staleReading(MeasurementType::MEAN, 0);
+        staleReading.setLabel("Mean");
+        staleReading.setValue(1.0);
+        module.updateMeasurement({&staleReading});
+
+        QVERIFY(module.voltWindow->consolidatedHistory[0].isEmpty());
+        QVERIFY(module.logicalRawVoltage[0].isEmpty());
+
+        click(buttons(*module.voltWindow, "voltmeterAcquisitionMode"), 1);
+        module.isReferenceMeasured = false;
+        module.activeCaptureIsMultimode = false;
+        module.updateMeasurement({&staleReading});
+        QVERIFY(module.voltWindow->consolidatedHistory[0].isEmpty());
+        QVERIFY(module.logicalRawVoltage[0].isEmpty());
+
+        delete module.measCalc;
+        delete module.voltmeterData;
+        delete module.voltWindow;
+        delete module.config;
+        delete spec;
+        qDeleteAll(module.voltMeasList);
+    }
+
     void initTestCase()
     {
         Graphics::setTheme(0);
