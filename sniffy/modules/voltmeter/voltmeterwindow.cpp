@@ -659,6 +659,9 @@ void VoltmeterWindow::setLogicalInputs(const QStringList &keys, const QStringLis
         consolidatedHistory[i] = previousHistory.value(keys.at(i));
         consolidatedTraceVisible[i] = previousVisibility.value(keys.at(i), false);
         consolidatedValueLabels.at(i)->setName(labels.value(i));
+        if (!consolidatedHistory[i].isEmpty())
+            consolidatedValueLabels.at(i)->setValue(
+                QLocale().toString(consolidatedHistory[i].last().y(), 'f', 4) + " V");
         if (consolidatedTraceVisible[i])
             consolidatedValueLabels.at(i)->show();
     }
