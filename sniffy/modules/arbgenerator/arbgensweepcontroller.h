@@ -4,7 +4,7 @@
 #include <QObject>
 #include <QDebug>
 #include <QTimer>
-#include <QDateTime>
+#include <QVector>
 
 #include "arbgeneratordefs.h"
 
@@ -14,20 +14,21 @@ class ArbGenSweepController : public QObject
 public:
     explicit ArbGenSweepController(QObject *parent = nullptr);
 
-    void setParameters(qreal minFreq,qreal maxFreq,qreal totalTime);
+    bool setParameters(qreal minFreq, qreal maxFreq, qreal totalTime,
+                       SweepScale scale = SweepScale::LINEAR, SweepMode mode = SweepMode::SAW);
     void startTimer();
     void stopTimer();
+    bool isActive() const;
 
 private:
-    qreal minFreq;
-    qreal maxFreq;
-    qreal totalTime;
+    qreal minFreq = 0;
+    qreal maxFreq = 0;
+    qreal totalTime = 0;
+    SweepScale scale = SweepScale::LINEAR;
+    SweepMode mode = SweepMode::SAW;
 
-    qreal sampleTime;
-    int numSamples;
     QVector<qreal> freqSamples;
     int actualIndex = 0;
-    bool isRunning = false;
 
     QTimer *timer;
 

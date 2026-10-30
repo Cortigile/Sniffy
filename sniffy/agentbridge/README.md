@@ -203,7 +203,7 @@ instead of advertising tools that would only fail later with `Unknown method`.
 | `arbgen_set_phase` | `{module, channel, value}` | Phase (degrees) |
 | `arbgen_set_channels` | `{module, count}` | Number of active channels |
 | `arbgen_set_memory` | `{module, mode, length?}` | 0=Best fit, 1=Long, 2=Custom |
-| `arbgen_set_sweep` | `{module, enable, min_freq?, max_freq?, sweep_time?}` | SW frequency sweep on CH1 |
+| `arbgen_set_sweep` | `{module, enable, min_freq?, max_freq?, sweep_time?, channel?, scale?, mode?}` | Independent CH1/CH2 sweep (`channel`: 0/1, default 0); `scale`: `linear`/`exponential`; `mode`: `saw`/`symmetric`; time in seconds per leg. Disable CH1 frequency sync before editing CH2's sweep. |
 | `arbgen_set_freq_sync` | `{module, channel, enabled}` | Sync frequency with CH1 |
 | `arbgen_set_pwm_frequency` | `{module, channel, value}` | PWM carrier frequency |
 | `arbgen_set_pwm_freq_sync` | `{module, channel, enabled}` | PWM freq sync with CH1 |

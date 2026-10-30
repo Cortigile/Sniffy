@@ -54,6 +54,7 @@
 #include <QDataStream>
 #include <QDateTime>
 #include <QJsonValue>
+#include <QSignalBlocker>
 #include <QMutexLocker>
 #include <QtEndian>
 #include <cmath>
@@ -296,11 +297,11 @@ static QJsonObject buildModuleState(QWidget *widget, const QString &moduleName, 
             if (memIdx == 2)
                 st[QStringLiteral("custom_length")] = s->customLength;
             // SW Sweep
-            st[QStringLiteral("sweep_enabled")] = s->isSweepEnabled;
-            if (s->isSweepEnabled) {
-                st[QStringLiteral("sweep_min_freq")] = s->dialFreqSweepMin->getRealValue();
-                st[QStringLiteral("sweep_max_freq")] = s->dialFreqSweepMax->getRealValue();
-                st[QStringLiteral("sweep_time")]     = s->dialSweepTime->getRealValue();
+            st[QStringLiteral("sweep_enabled")] = s->isSweepEnabled[0];
+            if (s->isSweepEnabled[0]) {
+                st[QStringLiteral("sweep_min_freq")] = s->dialFreqSweepMin[0]->getRealValue();
+                st[QStringLiteral("sweep_max_freq")] = s->dialFreqSweepMax[0]->getRealValue();
+                st[QStringLiteral("sweep_time")]     = s->dialSweepTime[0]->getRealValue();
             }
             QJsonArray chArr;
             for (int i = 0; i < MAX_ARB_CHANNELS_NUM; ++i) {
@@ -315,6 +316,20 @@ static QJsonObject buildModuleState(QWidget *widget, const QString &moduleName, 
                 ch[QStringLiteral("phase")]      = s->dialPhaseCh[i]->getRealValue();
                 if (i > 0)
                     ch[QStringLiteral("freq_sync_ch1")] = s->channelSyncWithCH1[i];
+                if (i < MAX_SWEEP_CHANNELS_NUM) {
+                    ch[QStringLiteral("sweep")] = QJsonObject{
+                        {QStringLiteral("enabled"), s->isSweepEnabled[i]},
+                        {QStringLiteral("active"), s->isSweepActive(i) ||
+                            (s->channelEnabled[i] && s->channelSyncWithCH1[i] && s->isSweepActive(0))},
+                        {QStringLiteral("min_freq"), s->dialFreqSweepMin[i]->getRealValue()},
+                        {QStringLiteral("max_freq"), s->dialFreqSweepMax[i]->getRealValue()},
+                        {QStringLiteral("sweep_time"), s->dialSweepTime[i]->getRealValue()},
+                        {QStringLiteral("scale"), s->buttonsSweepScale[i]->getSelectedIndex() == 1
+                            ? QStringLiteral("exponential") : QStringLiteral("linear")},
+                        {QStringLiteral("mode"), s->buttonsSweepMode[i]->getSelectedIndex() == 1
+                            ? QStringLiteral("symmetric") : QStringLiteral("saw")}
+                    };
+                }
                 // PWM-specific per-channel fields
                 if (s->isPWMbased) {
                     ch[QStringLiteral("pwm_frequency")]       = s->dialPWMFreqCh[i]->getRealValue();
@@ -2019,21 +2034,55 @@ void AgentBridge::registerHandlers()
         return QJsonObject{{QStringLiteral("ok"), true}};
     };
 
-    // arbgen_set_sweep — enable/disable SW sweep and optionally set min/max freq + time
+    // arbgen_set_sweep — independent channel sweeps; omitted channel retains the CH1 API
     m_handlers[QStringLiteral("arbgen_set_sweep")] = [this, findArbGen](const QJsonObject &p) -> QJsonObject {
         ArbGenPanelSettings *s = nullptr;
         auto err = findArbGen(p, s);
         if (!err.isEmpty()) return err;
-        bool enable = p.value(QStringLiteral("enable")).toBool(false);
-        s->buttonSWSweepEnable->clickedInternal(enable ? 1 : 0);
-        if (enable) {
-            if (p.contains(QStringLiteral("min_freq")))
-                s->dialFreqSweepMin->setRealValue(static_cast<float>(p.value(QStringLiteral("min_freq")).toDouble()), false);
-            if (p.contains(QStringLiteral("max_freq")))
-                s->dialFreqSweepMax->setRealValue(static_cast<float>(p.value(QStringLiteral("max_freq")).toDouble()), false);
-            if (p.contains(QStringLiteral("sweep_time")))
-                s->dialSweepTime->setRealValue(static_cast<float>(p.value(QStringLiteral("sweep_time")).toDouble()), false);
+        const auto invalid = [](const QString &message) {
+            return QJsonObject{{QStringLiteral("error"), message}, {QStringLiteral("code"), -32602}};
+        };
+        const double channelValue = p.value(QStringLiteral("channel")).toDouble(0);
+        if ((p.contains(QStringLiteral("channel")) && !p.value(QStringLiteral("channel")).isDouble()) ||
+            !std::isfinite(channelValue) || channelValue != std::floor(channelValue) ||
+            channelValue < 0 || channelValue >= qMin(MAX_SWEEP_CHANNELS_NUM, s->getMaxNumChannels()))
+            return invalid(QStringLiteral("Sweep channel must be 0 (CH1) or 1 (CH2) and available on the board"));
+        const int channel = static_cast<int>(channelValue);
+        if (s->channelSyncWithCH1[channel])
+            return invalid(QStringLiteral("Disable CH1 frequency sync before editing an independent CH2 sweep"));
+        if (p.contains(QStringLiteral("enable")) && !p.value(QStringLiteral("enable")).isBool())
+            return invalid(QStringLiteral("Sweep enable must be a boolean"));
+        const bool enable = p.value(QStringLiteral("enable")).toBool(false);
+        const QString scale = p.value(QStringLiteral("scale")).toString(
+            s->buttonsSweepScale[channel]->getSelectedIndex() == 1 ? QStringLiteral("exponential") : QStringLiteral("linear"));
+        const QString mode = p.value(QStringLiteral("mode")).toString(
+            s->buttonsSweepMode[channel]->getSelectedIndex() == 1 ? QStringLiteral("symmetric") : QStringLiteral("saw"));
+        if ((p.contains(QStringLiteral("scale")) && !p.value(QStringLiteral("scale")).isString()) ||
+            (scale != QStringLiteral("linear") && scale != QStringLiteral("exponential")))
+            return invalid(QStringLiteral("Sweep scale must be linear or exponential"));
+        if ((p.contains(QStringLiteral("mode")) && !p.value(QStringLiteral("mode")).isString()) ||
+            (mode != QStringLiteral("saw") && mode != QStringLiteral("symmetric")))
+            return invalid(QStringLiteral("Sweep mode must be saw or symmetric"));
+        const double minFreq = p.value(QStringLiteral("min_freq")).toDouble(s->dialFreqSweepMin[channel]->getRealValue());
+        const double maxFreq = p.value(QStringLiteral("max_freq")).toDouble(s->dialFreqSweepMax[channel]->getRealValue());
+        const double time = p.value(QStringLiteral("sweep_time")).toDouble(s->dialSweepTime[channel]->getRealValue());
+        for (const QString &key : {QStringLiteral("min_freq"), QStringLiteral("max_freq"), QStringLiteral("sweep_time")}) {
+            if (p.contains(key) && !p.value(key).isDouble())
+                return invalid(QStringLiteral("Sweep numeric parameters must be numbers"));
         }
+        if (!std::isfinite(minFreq) || !std::isfinite(maxFreq) || !std::isfinite(time) ||
+            minFreq < double(0.01f) || maxFreq > 1000000 || minFreq > maxFreq || time < 0.1 || time > 60)
+            return invalid(QStringLiteral("Sweep requires 0.01 <= min_freq <= max_freq <= 1000000 Hz and 0.1 <= sweep_time <= 60 s per leg"));
+        {
+            const QSignalBlocker blocker(s);
+            s->dialFreqSweepMin[channel]->setRealValue(static_cast<float>(minFreq), true);
+            s->dialFreqSweepMax[channel]->setRealValue(static_cast<float>(maxFreq), true);
+            s->dialSweepTime[channel]->setRealValue(static_cast<float>(time), true);
+            s->buttonsSweepScale[channel]->restoreGeometry(scale == QStringLiteral("exponential") ? "2" : "1");
+            s->buttonsSweepMode[channel]->restoreGeometry(mode == QStringLiteral("symmetric") ? "2" : "1");
+            s->buttonSWSweepEnable[channel]->clickedInternal(enable ? 1 : 0);
+        }
+        emit s->signalChanged();
         return QJsonObject{{QStringLiteral("ok"), true}};
     };
 
@@ -2046,9 +2095,7 @@ void AgentBridge::registerHandlers()
         if (ch < 1 || ch >= MAX_ARB_CHANNELS_NUM || !s->swSyncWithCH1[ch])
             return QJsonObject{{QStringLiteral("error"), QStringLiteral("Invalid channel for freq sync (must be 1-3, i.e. CH2-CH4)")}, {QStringLiteral("code"), -32602}};
         bool on = p.value(QStringLiteral("enabled")).toBool(false);
-        QMetaObject::invokeMethod(s->swSyncWithCH1[ch],
-                                  on ? "setRight" : "setLeft",
-                                  Qt::DirectConnection);
+        s->setChannelFrequencySync(ch, on);
         return QJsonObject{{QStringLiteral("ok"), true}};
     };
 

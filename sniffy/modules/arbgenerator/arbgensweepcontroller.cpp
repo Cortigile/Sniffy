@@ -1,4 +1,5 @@
 #include "arbgensweepcontroller.h"
+#include <cmath>
 
 ArbGenSweepController::ArbGenSweepController(QObject *parent):
     QObject(parent)
@@ -7,46 +8,78 @@ ArbGenSweepController::ArbGenSweepController(QObject *parent):
    connect(timer, &QTimer::timeout, this, &ArbGenSweepController::timerCallback);
 }
 
-void ArbGenSweepController::setParameters(qreal minFreq, qreal maxFreq, qreal totalTime)
+bool ArbGenSweepController::setParameters(qreal minFreq, qreal maxFreq, qreal totalTime,
+                                         SweepScale scale, SweepMode mode)
 {
+    if (!std::isfinite(minFreq) || !std::isfinite(maxFreq) || !std::isfinite(totalTime) ||
+        minFreq < qreal(0.01f) || maxFreq > 1000000 || minFreq > maxFreq ||
+        totalTime < 0.1 || totalTime > 60 ||
+        (scale != SweepScale::LINEAR && scale != SweepScale::EXPONENTIAL) ||
+        (mode != SweepMode::SAW && mode != SweepMode::SYMMETRIC)) {
+        qWarning() << "Invalid generator sweep parameters:" << minFreq << maxFreq << totalTime;
+        stopTimer();
+        freqSamples.clear();
+        return false;
+    }
+
+    if (!freqSamples.isEmpty() && this->minFreq == minFreq && this->maxFreq == maxFreq &&
+        this->totalTime == totalTime && this->scale == scale && this->mode == mode)
+        return true;
+
     actualIndex = 0;
     this->minFreq = minFreq;
     this->maxFreq = maxFreq;
     this->totalTime = totalTime;
-
-    numSamples = (totalTime+0.001)/SWEEP_TIME_STEP;
-    sampleTime = totalTime/numSamples;
+    this->scale = scale;
+    this->mode = mode;
 
     freqSamples.clear();
-    for(int i = 0;i<numSamples;i++){
-        qreal tmpFreq =  minFreq + (qreal)(i)/(numSamples-1) * (maxFreq - minFreq);
-        freqSamples.append(tmpFreq);
+    const int intervals = qMax(2, qRound(totalTime / SWEEP_TIME_STEP));
+    for (int i = 0; i <= intervals; ++i) {
+        const qreal fraction = qreal(i) / intervals;
+        const qreal frequency = scale == SweepScale::EXPONENTIAL
+            ? minFreq * std::pow(maxFreq / minFreq, fraction)
+            : minFreq + fraction * (maxFreq - minFreq);
+        freqSamples.append(frequency);
+    }
+    freqSamples.first() = minFreq;
+    freqSamples.last() = maxFreq;
+    if (mode == SweepMode::SYMMETRIC) {
+        for (int i = intervals - 1; i > 0; --i)
+            freqSamples.append(freqSamples.at(i));
     }
 
-    timer->setInterval(sampleTime*1000);
+    timer->setInterval(qRound(totalTime / intervals * 1000));
     timer->setTimerType(Qt::PreciseTimer);
+    return true;
 }
 
 void ArbGenSweepController::startTimer()
 {
-    if(!isRunning){
-        timerCallback();
-        timer->start();
+    if (freqSamples.isEmpty()) {
+        qWarning() << "Cannot start generator sweep without valid parameters";
+        return;
     }
-    isRunning = true;
+    if (timer->isActive())
+        return;
+    timer->start();
+    timerCallback();
 }
 
 void ArbGenSweepController::stopTimer()
 {
-    if (isRunning)timer->stop();
-    isRunning = false;
+    timer->stop();
+    actualIndex = 0;
+}
+
+bool ArbGenSweepController::isActive() const
+{
+    return timer->isActive();
 }
 
 void ArbGenSweepController::timerCallback()
 {
-    emit updateSweepFrequency(freqSamples.at(actualIndex));
-    //QDateTime date = QDateTime::currentDateTime();
-    //qDebug() <<date.time()<<freqSamples.at(actualIndex) << "Hz";
-    actualIndex = (actualIndex+1)%numSamples;
-
+    const qreal frequency = freqSamples.at(actualIndex);
+    actualIndex = (actualIndex + 1) % freqSamples.size();
+    emit updateSweepFrequency(frequency);
 }

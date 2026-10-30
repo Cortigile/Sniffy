@@ -46,45 +46,16 @@ ArbGenPanelSettings::ArbGenPanelSettings(QVBoxLayout *destination, bool isPWMbas
     labelArbFileInfo = new WidgetLabel(parent,"No arbitrary data file selected","");
     labelArbFileInfo->setObjectName("labelInfoArbGen");
 
-    buttonSWSweepEnable = new WidgetButtons (parent,2,ButtonTypes::RADIO,"SW sweep CH1",0);
-    buttonSWSweepEnable->setText("   Off   ",0);
-    buttonSWSweepEnable->setText("   On   ",1);
-    buttonSWSweepEnable->setColor(Graphics::palette().controls,0);
-    buttonSWSweepEnable->setColor(Graphics::palette().controls,1);
-    buttonSWSweepEnable->setObjectName("arbGenSweepbtn");
-
     QHBoxLayout *commonButtons = new QHBoxLayout();
-    QHBoxLayout *commonButtons2 = new QHBoxLayout();
     destination->addWidget(buttonsGenerate);
     commonButtons->addWidget(buttonsMemory);
     commonButtons->addWidget(customLengthInput);
     destination->addLayout(commonButtons);
     destination->addWidget(buttonsEnable);
-    commonButtons2->addWidget(buttonSelectFile);
-    commonButtons2->addWidget(buttonSWSweepEnable);
-    destination->addLayout(commonButtons2);
+    destination->addWidget(buttonSelectFile);
     destination->addWidget(labelArbFileInfo);
 
-
-    sweepControl = new QHBoxLayout();
-    dialFreqSweepMin = new WidgetDialRange(parent,"Min frequency");
-    dialFreqSweepMin->setObjectName("arbGenfreqSweepMin");
-    dialFreqSweepMin->setRange(0.01,1000000,"Hz",1,0.01,1000,true);
-
-    dialFreqSweepMax = new WidgetDialRange(parent,"Max frequency");
-    dialFreqSweepMax->setObjectName("arbGenfreqSweepMax");
-    dialFreqSweepMax->setRange(0.01,1000000,"Hz",1,0.01,1000,true);
-
-    dialSweepTime = new WidgetDialRange(parent,"Sweep time");
-    dialSweepTime->setObjectName("arbGenfreqSweeptime");
-    dialSweepTime->setRange(0.1,60,"s",1,0.1,1,true);
-
-    sweepControl->addWidget(dialFreqSweepMin);
-    sweepControl->addWidget(dialFreqSweepMax);
-    sweepControl->addWidget(dialSweepTime);
-    destination->addLayout(sweepControl);
-
-    channelTabs = new widgetTab(parent, MAX_ARB_CHANNELS_NUM);
+    channelTabs = new widgetTab(parent, MAX_ARB_CHANNELS_NUM + 1);
     channelTabs->setObjectName("arbGenChannelTabs");
     destination->addWidget(channelTabs);
 
@@ -213,15 +184,99 @@ ArbGenPanelSettings::ArbGenPanelSettings(QVBoxLayout *destination, bool isPWMbas
         if(isPWMbased){
             connect(dialPWMFreqCh[i],&WidgetDialRange::valueChanged,this,&ArbGenPanelSettings::signalPWMFrequencyCallback);
         }
-        setChannelShown(i,false);
+        channelEnabled[i] = i == 0;
+        setChannelShown(i, channelEnabled[i]);
     }
+    createSweepControls(parent);
     connect(buttonsEnable,&WidgetButtons::clicked,this,&ArbGenPanelSettings::buttonEnableChannelCallback);
     connect(buttonsMemory,&WidgetButtons::clicked,this,&ArbGenPanelSettings::memoryCallback);
     connect(customLengthInput,&WidgetTextInput::numberChanged,this,&ArbGenPanelSettings::customLenghtCallback);
-    connect(buttonSWSweepEnable,&WidgetButtons::clicked,this,&ArbGenPanelSettings::buttonSweepCallback);
-    connect(dialFreqSweepMax,&WidgetDialRange::valueChanged,this,&ArbGenPanelSettings::sweepMaxCallback);
-    connect(dialFreqSweepMin,&WidgetDialRange::valueChanged,this,&ArbGenPanelSettings::sweepMinCallback);
-    connect(dialSweepTime,&WidgetDialRange::valueChanged,this,&ArbGenPanelSettings::sweepSettingsCallback);
+}
+
+void ArbGenPanelSettings::createSweepControls(QWidget *parent)
+{
+    channelTabs->setText("Sweep", MAX_ARB_CHANNELS_NUM);
+    auto *scroll = new QScrollArea(parent);
+    scroll->setObjectName("arbGenSweepScroll");
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    channelTabs->getLayout(MAX_ARB_CHANNELS_NUM)->addWidget(scroll);
+    auto *content = new QWidget(scroll);
+    auto *layout = new QVBoxLayout(content);
+    scroll->setWidget(content);
+
+    for (int i = 0; i < MAX_SWEEP_CHANNELS_NUM; ++i) {
+        const QString channelName = QString::number(i + 1);
+        // Keep CH1 object names compatible with saved layouts.
+        const QString suffix = i == 0 ? QString() : channelName;
+        sweepChannelArea[i] = new QWidget(content);
+        auto *channelLayout = new QVBoxLayout(sweepChannelArea[i]);
+        channelLayout->setContentsMargins(0, 0, 0, 0);
+        channelLayout->addWidget(new WidgetSeparator(sweepChannelArea[i], "CH" + channelName + " sweep"));
+        layout->addWidget(sweepChannelArea[i]);
+
+        if (i == 1) {
+            buttonSweepSyncWithCH1 = new WidgetButtons(sweepChannelArea[i], 2, ButtonTypes::RADIO,
+                                                      "Sync with CH1", 0);
+            buttonSweepSyncWithCH1->setObjectName("arbGenSweepSyncCH2");
+            buttonSweepSyncWithCH1->setText("Off", 0);
+            buttonSweepSyncWithCH1->setText("On", 1);
+            buttonSweepSyncWithCH1->setToolTip("Follow CH1 frequency and sweep, keeping the configured phase offset.");
+            channelLayout->addWidget(buttonSweepSyncWithCH1);
+            connect(buttonSweepSyncWithCH1, &WidgetButtons::clicked, this, [this](int index) {
+                setChannelFrequencySync(1, index == 1);
+            });
+        }
+
+        sweepControlsArea[i] = new QWidget(sweepChannelArea[i]);
+        auto *controls = new QVBoxLayout(sweepControlsArea[i]);
+        controls->setContentsMargins(0, 0, 0, 0);
+        channelLayout->addWidget(sweepControlsArea[i]);
+        buttonSWSweepEnable[i] = new WidgetButtons(sweepControlsArea[i], 2, ButtonTypes::RADIO,
+                                                  "SW sweep", 0, i);
+        buttonSWSweepEnable[i]->setObjectName("arbGenSweepbtn" + suffix);
+        buttonSWSweepEnable[i]->setText("Off", 0);
+        buttonSWSweepEnable[i]->setText("On", 1);
+        controls->addWidget(buttonSWSweepEnable[i]);
+
+        sweepParametersArea[i] = new QWidget(sweepControlsArea[i]);
+        auto *parameters = new QVBoxLayout(sweepParametersArea[i]);
+        parameters->setContentsMargins(0, 0, 0, 0);
+        controls->addWidget(sweepParametersArea[i]);
+        buttonsSweepScale[i] = new WidgetButtons(sweepParametersArea[i], 2, ButtonTypes::RADIO, "Scale");
+        buttonsSweepScale[i]->setObjectName("arbGenSweepScale" + channelName);
+        buttonsSweepScale[i]->setText("Linear", 0);
+        buttonsSweepScale[i]->setText("Exponential", 1);
+        parameters->addWidget(buttonsSweepScale[i]);
+        buttonsSweepMode[i] = new WidgetButtons(sweepParametersArea[i], 2, ButtonTypes::RADIO, "Mode");
+        buttonsSweepMode[i]->setObjectName("arbGenSweepMode" + channelName);
+        buttonsSweepMode[i]->setText("Saw", 0);
+        buttonsSweepMode[i]->setText("Up / down", 1);
+        parameters->addWidget(buttonsSweepMode[i]);
+
+        dialFreqSweepMin[i] = new WidgetDialRange(sweepParametersArea[i], "Min frequency", i);
+        dialFreqSweepMin[i]->setObjectName("arbGenfreqSweepMin" + suffix);
+        dialFreqSweepMin[i]->setRange(0.01, 1000000, "Hz", 1, 0.01, 1000, true);
+        parameters->addWidget(dialFreqSweepMin[i]);
+        dialFreqSweepMax[i] = new WidgetDialRange(sweepParametersArea[i], "Max frequency", i);
+        dialFreqSweepMax[i]->setObjectName("arbGenfreqSweepMax" + suffix);
+        dialFreqSweepMax[i]->setRange(0.01, 1000000, "Hz", 1, 0.01, 1000, true);
+        parameters->addWidget(dialFreqSweepMax[i]);
+        dialSweepTime[i] = new WidgetDialRange(sweepParametersArea[i], "Sweep time (per leg)", i);
+        dialSweepTime[i]->setObjectName("arbGenfreqSweeptime" + suffix);
+        dialSweepTime[i]->setRange(0.1, 60, "s", 1, 0.1, 1, true);
+        dialSweepTime[i]->setToolTip("Time from minimum to maximum. Up / down takes twice this time for a complete cycle.");
+        parameters->addWidget(dialSweepTime[i]);
+
+        connect(buttonSWSweepEnable[i], &WidgetButtons::clicked, this, &ArbGenPanelSettings::buttonSweepCallback);
+        connect(dialFreqSweepMax[i], &WidgetDialRange::valueChanged, this, &ArbGenPanelSettings::sweepMaxCallback);
+        connect(dialFreqSweepMin[i], &WidgetDialRange::valueChanged, this, &ArbGenPanelSettings::sweepMinCallback);
+        connect(dialSweepTime[i], &WidgetDialRange::valueChanged, this, [this, i]() { sweepSettingsCallback(i); });
+        connect(buttonsSweepScale[i], &WidgetButtons::clicked, this, [this, i]() { sweepSettingsCallback(i); });
+        connect(buttonsSweepMode[i], &WidgetButtons::clicked, this, [this, i]() { sweepSettingsCallback(i); });
+    }
+    layout->addStretch();
+    updateSweepControls();
 }
 
 void ArbGenPanelSettings::setChannelShown(int index, bool isShown)
@@ -232,44 +287,42 @@ void ArbGenPanelSettings::setChannelShown(int index, bool isShown)
 void ArbGenPanelSettings::restoreGUI()
 {
     isSilentGUIUpdate = true;
-    numChannelsEnabled = qMax(1, buttonsEnable->getSelectedIndex() + 1);
-    for(int i = 0;i<buttonsEnable->getSelectedIndex()+1;i++){
-        setChannelShown(i,true);
-        channelEnabled[i] = true;
-    }
-    for(int i = buttonsEnable->getSelectedIndex()+1;i<MAX_ARB_CHANNELS_NUM;i++){
-        setChannelShown(i,false);
-        channelEnabled[i] = false;
-    }
+    buttonEnableChannelCallback(qBound(0, buttonsEnable->getSelectedIndex(), maxNumChannels - 1));
 
     memoryCallback(buttonsMemory->getSelectedIndex());
     customLengthInput->processInput();
     customLenghtCallback(customLengthInput->getValue());
-    buttonSweepCallback(buttonSWSweepEnable->getSelectedIndex());
+    for (int i = 0; i < MAX_SWEEP_CHANNELS_NUM; ++i)
+        isSweepEnabled[i] = buttonSWSweepEnable[i]->getSelectedIndex() == 1;
 
     for(int i =0;i<MAX_ARB_CHANNELS_NUM;i++){
         buttonShapeCallback(buttonsShape[i]->getSelectedIndex(),i);
-        if(i>0 && swSyncWithCH1[i]->isCheckedRight()){
-            syncWithCH1Callback(1,i);
-        }
+        if (i > 0)
+            syncWithCH1Callback(swSyncWithCH1[i]->isCheckedRight() ? 1 : 0, i);
         if(i>0 && swSyncPWMWithCH1[i]->isCheckedRight()){
             syncPWMWithCH1Callback(1,i);
         }
         signalPWMFrequencyCallback(dialPWMFreqCh[i]->getRealValue(),i);
     }
-    sweepMaxCallback(dialFreqSweepMax->getRealValue());
+    for (int i = 0; i < MAX_SWEEP_CHANNELS_NUM; ++i)
+        sweepMaxCallback(dialFreqSweepMax[i]->getRealValue(), i);
+    updateSweepControls();
     isSilentGUIUpdate = false;
     signalChangedCallback();
 }
 
 void ArbGenPanelSettings::setMaxNumChannels(int numChannels)
 {
+    maxNumChannels = qBound(1, numChannels, MAX_ARB_CHANNELS_NUM);
     bool tmp;
     for (int i = 0; i< MAX_ARB_CHANNELS_NUM; i++) {
         if(numChannels <= i) tmp = true;
         else tmp = false;
         buttonsEnable->setButtonHidden(tmp,i);
     }
+    if (numChannelsEnabled > maxNumChannels)
+        buttonEnableChannelCallback(maxNumChannels - 1);
+    updateSweepControls();
 }
 
 void ArbGenPanelSettings::setDataLengthLabels(int length, int index)
@@ -327,7 +380,7 @@ void ArbGenPanelSettings::enableGUI()
     buttonsEnable->setEnabled(true);
     buttonsMemory->setEnabled(true);
     customLengthInput->setEnabled(true);
-    sweepMaxCallback(dialFreqSweepMax->getRealValue());
+    updateSweepControls();
 }
 
 void ArbGenPanelSettings::copyFreq(int fromCh, int toCh)
@@ -344,6 +397,8 @@ void ArbGenPanelSettings::copyPWMFreq(int fromCh, int toCh)
 
 void ArbGenPanelSettings::buttonEnableChannelCallback(int index)
 {
+    index = qBound(0, index, maxNumChannels - 1);
+    buttonsEnable->restoreGeometry(QByteArray::number(1 << index));
     for(int i = 0;i<index+1;i++){
         setChannelShown(i,true);
         channelEnabled[i] = true;
@@ -353,6 +408,9 @@ void ArbGenPanelSettings::buttonEnableChannelCallback(int index)
         channelEnabled[i] = false;
     }
     numChannelsEnabled = index+1;
+    updateSweepControls();
+    if (!isSilentGUIUpdate)
+        prepareSweepFrequencies();
     signalChangedCallback();
 }
 
@@ -397,15 +455,25 @@ void ArbGenPanelSettings::syncWithCH1Callback(int clicked, int channel)
 {
     if(clicked==0){
         channelSyncWithCH1[channel] = false;
-        dialFreqCh[channel]->setEnabled(true);
     }else{
         channelSyncWithCH1[channel] = true;
         copyFreq(0,channel);
-        dialFreqCh[channel]->setEnabled(false);
     }
+    if (channel == 1)
+        buttonSweepSyncWithCH1->restoreGeometry(clicked == 0 ? "1" : "2");
+    updateSweepControls();
+    if (clicked == 0)
+        prepareSweepFrequencies(channel);
     signalChangedCallback();
 
-    if(clicked != 0) emit syncRequest();
+    if(clicked != 0 && !isSilentGUIUpdate) emit syncRequest();
+}
+
+void ArbGenPanelSettings::setChannelFrequencySync(int channel, bool enabled)
+{
+    Q_ASSERT(channel > 0 && channel < MAX_ARB_CHANNELS_NUM);
+    swSyncWithCH1[channel]->restoreGeometry(enabled ? "R" : "L");
+    syncWithCH1Callback(enabled ? 1 : 0, channel);
 }
 
 void ArbGenPanelSettings::syncPWMWithCH1Callback(int clicked, int channel)
@@ -430,12 +498,16 @@ void ArbGenPanelSettings::signalFrequencyCallback(qreal value, int channel)
             if(channelSyncWithCH1[i])
                 copyFreq(0,i);
         }
-        dialFreqSweepMax->setRealValue(value,true);
     }else{
         if(channelSyncWithCH1[channel])
             dialFreqCh[0]->setRealValue(value,false);
     }
 
+    if (channel < MAX_SWEEP_CHANNELS_NUM && !channelSyncWithCH1[channel]) {
+        dialFreqSweepMax[channel]->setRealValue(value, true);
+        if (value < dialFreqSweepMin[channel]->getRealValue())
+            dialFreqSweepMin[channel]->setRealValue(value, true);
+    }
     if (channel == 0 || !channelSyncWithCH1[channel])
         signalChangedCallback();
 }
@@ -478,38 +550,62 @@ void ArbGenPanelSettings::customLenghtCallback(qreal value)
     signalChangedCallback();
 }
 
-void ArbGenPanelSettings::buttonSweepCallback(int index)
+void ArbGenPanelSettings::buttonSweepCallback(int index, int channel)
 {
-    dialFreqSweepMax->setVisible(index);
-    dialFreqSweepMin->setVisible(index);
-    dialSweepTime->setVisible(index);
-    isSweepEnabled = index == 1?true:false;
+    isSweepEnabled[channel] = index == 1;
+    updateSweepControls();
+    prepareSweepFrequencies(channel);
     signalChangedCallback();
 }
 
-void ArbGenPanelSettings::sweepMaxCallback(qreal value)
+void ArbGenPanelSettings::sweepMaxCallback(qreal value, int channel)
 {
-    if(value<dialFreqSweepMin->getRealValue())
-        dialFreqSweepMin->setRealValue(value,true);
-    sweepSettingsCallback();
+    if(value<dialFreqSweepMin[channel]->getRealValue())
+        dialFreqSweepMin[channel]->setRealValue(value,true);
+    sweepSettingsCallback(channel);
 }
 
-void ArbGenPanelSettings::sweepMinCallback(qreal value)
+void ArbGenPanelSettings::sweepMinCallback(qreal value, int channel)
 {
-    if(value>dialFreqSweepMax->getRealValue())
-        dialFreqSweepMax->setRealValue(value,true);
-    sweepSettingsCallback();
+    if(value>dialFreqSweepMax[channel]->getRealValue())
+        dialFreqSweepMax[channel]->setRealValue(value,true);
+    sweepSettingsCallback(channel);
 }
 
-void ArbGenPanelSettings::sweepSettingsCallback()
+void ArbGenPanelSettings::sweepSettingsCallback(int channel)
 {
-    dialFreqCh[0]->setRealValue(dialFreqSweepMax->getRealValue(),true);
-    for (int i = 1;i<MAX_ARB_CHANNELS_NUM ; i++) {
-        if(swSyncWithCH1[i]->isCheckedRight()){
-            dialFreqCh[i]->setRealValue(dialFreqSweepMax->getRealValue(),true);
-        }
+    prepareSweepFrequencies(channel);
+    signalChangedCallback();
+}
+
+bool ArbGenPanelSettings::isSweepActive(int channel) const
+{
+    Q_ASSERT(channel >= 0 && channel < MAX_ARB_CHANNELS_NUM);
+    return channel < MAX_SWEEP_CHANNELS_NUM && channelEnabled[channel] &&
+           isSweepEnabled[channel] && !channelSyncWithCH1[channel];
+}
+
+void ArbGenPanelSettings::prepareSweepFrequencies(int channel)
+{
+    for (int i = 0; i < MAX_SWEEP_CHANNELS_NUM; ++i) {
+        if ((channel < 0 || channel == i) && isSweepActive(i))
+            dialFreqCh[i]->setRealValue(dialFreqSweepMax[i]->getRealValue(), true);
     }
-    signalChangedCallback();
+    for (int i = 1; i < MAX_ARB_CHANNELS_NUM; ++i) {
+        if (channelSyncWithCH1[i])
+            copyFreq(0, i);
+    }
+}
+
+void ArbGenPanelSettings::updateSweepControls()
+{
+    for (int i = 0; i < MAX_SWEEP_CHANNELS_NUM; ++i) {
+        sweepChannelArea[i]->setVisible(i < maxNumChannels && channelEnabled[i]);
+        sweepControlsArea[i]->setEnabled(!channelSyncWithCH1[i]);
+        sweepParametersArea[i]->setEnabled(isSweepEnabled[i]);
+    }
+    for (int i = 0; i < MAX_ARB_CHANNELS_NUM; ++i)
+        dialFreqCh[i]->setEnabled(!channelSyncWithCH1[i] && !isSweepActive(i));
 }
 
 void ArbGenPanelSettings::signalChangedCallback()

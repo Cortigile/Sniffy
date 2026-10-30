@@ -843,7 +843,16 @@ When changing frequency or during a sweep, it can happen (especially at higher f
 
 #### Frequency sweep
 
-Sweep is implemented via software, and the generation frequency is updated approximately every 50 ms. It primarily affects the CH1 channel, and other channels can join in through frequency synchronization.
+The **Sweep** tab next to the channel tabs contains vertically arranged controls. CH1 and CH2 each have independent sweep enable, minimum/maximum frequency, time, scale, and mode settings. CH2 controls appear when a second channel is available and enabled. The same controls are available in the PWM generator.
+
+- **Linear** changes frequency in equal steps; **Exponential** changes it by equal ratios (logarithmic frequency spacing).
+- **Saw** ramps from minimum to maximum, steps back to minimum on the next update, and repeats.
+- **Up / down** ramps from minimum to maximum and back symmetrically, without a step at the turning points.
+- **Sweep time (per leg)** is the time for one ramp. An up/down cycle takes twice this time.
+
+Enable **Sync with CH1** in the CH2 sweep section to make CH1 the master. This is the same frequency synchronization control as in the CH2 tab: CH2 follows CH1's frequency and sweep, and its independent sweep controls are disabled without discarding their settings. Switching sync off restores independent control.
+
+Sweep is implemented in software with frequency updates approximately every 50 ms. Synchronized channels use a shared firmware frequency update when their sample lengths match, preserving the existing phase-synchronization path and configured phase offsets. Independent sweeps are not phase-locked; physical phase stability, especially at high frequencies or with different arbitrary-file lengths, remains hardware-dependent.
 
 Sweep parameters can be changed on the fly, but the limitations based on the maximum DAC frequency and the chosen memory length still apply.
 

@@ -48,13 +48,18 @@ ArbGeneratorWindow::ArbGeneratorWindow(ArbGeneratorConfig *config, bool isPWMbas
     generatorPWMChartData = new QVector<QVector<QPointF>>;
     generatorDACData = new QList<QList<int>>;
 
-    sweepController = new ArbGenSweepController();
+    for (int i = 0; i < MAX_SWEEP_CHANNELS_NUM; ++i) {
+        sweepController[i] = new ArbGenSweepController(this);
+        sweepController[i]->setObjectName("arbGenSweepController" + QString::number(i + 1));
+        connect(sweepController[i], &ArbGenSweepController::updateSweepFrequency, this, [this, i](qreal frequency) {
+            sweepTimerCallback(frequency, i);
+        });
+    }
 
     connect(setting,&ArbGenPanelSettings::signalChanged,this,&ArbGeneratorWindow::createSignalCallback);
     connect(setting,&ArbGenPanelSettings::syncRequest,this,&ArbGeneratorWindow::syncRequestCallback);
     connect(setting->buttonsGenerate,&WidgetButtons::clicked,this,&ArbGeneratorWindow::runGeneratorCallback);
     connect(setting->buttonSelectFile,&WidgetButtons::clicked,this,&ArbGeneratorWindow::openFileCallback);
-    connect(sweepController, &ArbGenSweepController::updateSweepFrequency, this,&ArbGeneratorWindow::sweepTimerCallback);
 }
 
 ArbGeneratorWindow::~ArbGeneratorWindow()
@@ -115,19 +120,16 @@ void ArbGeneratorWindow::setGeneratorRuning()
 {
     setGenerateButton("Stop",Graphics::palette().running);
     isGenerating = true;
-    if(setting->isSweepEnabled){
-        sweepController->startTimer();
-    }
+    updateSweepControllers();
 }
 
 void ArbGeneratorWindow::setGeneratorStopped()
 {
     setGenerateButton("Start",Graphics::palette().controls);
+    for (auto *controller : sweepController)
+        controller->stopTimer();
     isGenerating = false;
     createSignalCallback();
-    if(setting->isSweepEnabled){
-        sweepController->stopTimer();
-    }
     setting->enableGUI();
 }
 
@@ -165,6 +167,8 @@ void ArbGeneratorWindow::runGeneratorCallback()
 
 void ArbGeneratorWindow::createSignalCallback()
 {
+    if (!isGenerating)
+        setting->prepareSweepFrequencies();
     int length;
     int numChannelsUsed;
     QList<int> MCUData;
@@ -355,16 +359,9 @@ void ArbGeneratorWindow::createSignalCallback()
     }
 
 
-    if(setting->isSweepEnabled){
-        sweepController->setParameters(setting->dialFreqSweepMin->getRealValue(),setting->dialFreqSweepMax->getRealValue(),setting->dialSweepTime->getRealValue());
-    }
+    updateSweepControllers();
 
     if(isGenerating){
-        if(setting->isSweepEnabled){
-            sweepController->startTimer();
-        }else{
-            sweepController->stopTimer();
-        }
         emit updateFrequency();
     }
 
@@ -408,12 +405,31 @@ void ArbGeneratorWindow::openFileCallback()
     createSignalCallback();
 }
 
-void ArbGeneratorWindow::sweepTimerCallback(qreal frequency)
+void ArbGeneratorWindow::updateSweepControllers()
 {
-    setting->dialFreqCh[0]->setRealValue(frequency,true);
-    for (int i = 1;i<MAX_ARB_CHANNELS_NUM ; i++) {
-        if(setting->swSyncWithCH1[i]->isCheckedRight()){
-            setting->dialFreqCh[i]->setRealValue(frequency,true);
+    for (int i = 0; i < MAX_SWEEP_CHANNELS_NUM; ++i) {
+        if (!setting->isSweepActive(i)) {
+            sweepController[i]->stopTimer();
+            continue;
+        }
+        if (sweepController[i]->setParameters(setting->dialFreqSweepMin[i]->getRealValue(),
+                                               setting->dialFreqSweepMax[i]->getRealValue(),
+                                               setting->dialSweepTime[i]->getRealValue(),
+                                               static_cast<SweepScale>(setting->buttonsSweepScale[i]->getSelectedIndex()),
+                                               static_cast<SweepMode>(setting->buttonsSweepMode[i]->getSelectedIndex()))) {
+            if (isGenerating)
+                sweepController[i]->startTimer();
+        }
+    }
+}
+
+void ArbGeneratorWindow::sweepTimerCallback(qreal frequency, int channel)
+{
+    setting->dialFreqCh[channel]->setRealValue(frequency, true);
+    if (channel == 0) {
+        for (int i = 1; i < MAX_ARB_CHANNELS_NUM; ++i) {
+            if (setting->channelEnabled[i] && setting->channelSyncWithCH1[i])
+                setting->dialFreqCh[i]->setRealValue(frequency, true);
         }
     }
     emit updateFrequency();

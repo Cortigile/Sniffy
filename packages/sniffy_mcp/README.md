@@ -148,6 +148,9 @@ python -m sniffy_mcp call arbgen_set_phase "Arb. generator" 1 90
 python -m sniffy_mcp call arbgen_set_channels "Arb. generator" 2
 python -m sniffy_mcp call arbgen_set_memory "Arb. generator" 0       # 0=Best fit 1=Long 2=Custom
 python -m sniffy_mcp call arbgen_set_sweep "Arb. generator" 1 100 10000 5.0
+python -m sniffy_mcp call arbgen_set_freq_sync "Arb. generator" 1 false  # allow independent CH2 sweep
+python -m sniffy_mcp call arbgen_set_sweep "Arb. generator" true 100 10000 5.0 channel=1 scale=exponential mode=symmetric
+python -m sniffy_mcp call arbgen_set_sweep "Arb. generator" false channel=1
 python -m sniffy_mcp call arbgen_set_freq_sync "Arb. generator" 1 1  # sync CH2 to CH1
 python -m sniffy_mcp call arbgen_set_pwm_frequency "PWM generator" 0 20000
 python -m sniffy_mcp call arbgen_set_pwm_freq_sync "PWM generator" 1 1
@@ -191,7 +194,35 @@ python -m sniffy_mcp call wait_for_scope_data                        # blocks un
 
 The CLI uses **SniffyClient method names** (e.g. `module_start`), not MCP
 tool names (e.g. `sniffy_module_start`).  Arguments are auto-coerced to
-int/float where possible.
+bool/int/float where possible. Optional parameters can use `key=value`.
+
+### Arbitrary / PWM generator sweeps
+
+`arbgen_set_sweep(module, enable, min_freq=0, max_freq=0, sweep_time=0,
+channel=0, scale=None, mode=None)` keeps the original positional arguments.
+The appended options also work positionally in Python and the CLI.
+`sniffy_arbgen_set_sweep` exposes the same options through MCP.
+
+- `channel` is zero-based: **0=CH1** (default), **1=CH2**. Sweeps are
+  independent per channel.
+- `scale`: `"linear"` or `"exponential"`; `mode`: `"saw"` (reset after each
+  upward leg) or `"symmetric"` (up then down). Omitted scale/mode keep the
+  channel's current settings.
+- When enabling, optional `min_freq`/`max_freq` are **0.01–1,000,000 Hz**
+  with `min_freq <= max_freq`; `sweep_time` is **0.1–60 seconds per leg**.
+  A symmetric complete cycle takes **2 × sweep_time**. Legacy zero numeric
+  defaults are omitted; numeric options are not sent when disabling.
+- The C++ bridge validates channel, enum values, numeric bounds, and ordering.
+  It rejects sweep edits on a synced CH2: first call
+  `arbgen_set_freq_sync(module, 1, False)`. Setting sync to `True` makes CH2
+  follow CH1/master, including the sweep, and preserves the existing common
+  firmware timer updates. No separate sweep-sync API is needed.
+
+State from `get_module_state` retains top-level `sweep_enabled`,
+`sweep_min_freq`, `sweep_max_freq`, and `sweep_time` as **CH1** aliases.
+For `i < 2`, `channels[i].sweep` exposes `enabled`, `active`, `min_freq`,
+`max_freq`, `sweep_time`, `scale`, and `mode`. The existing per-channel
+`freq_sync_ch1` field reports synchronization.
 
 ## Usage — Direct Python
 
@@ -229,3 +260,16 @@ python -m sniffy_mcp         # starts MCP stdio server
 
 See [AGENT_INSTRUCTIONS.md](AGENT_INSTRUCTIONS.md) for the full protocol
 reference and workflow examples.
+
+## Sweep contract tests
+
+From this package directory, run:
+
+```powershell
+python -m unittest discover -s tests -p test_arbgen_sweep.py -v
+```
+
+These tests cover client requests, CLI argument
+handling, MCP registration/dispatch, state passthrough, and bridge-error
+propagation without hardware. MCP tests require the optional `mcp` dependency;
+they isolate the stdio entry point and do not test server startup.

@@ -39,6 +39,22 @@ configuration compatibility, session and mode restoration, input-selection limit
 counts, memory-limited period options, and reference/multimode capture sequencing.
 Voltage tests inject synthetic measurements; physical ADC settling and accuracy still need board testing.
 
+## Signal / PWM generator
+
+```powershell
+cmake -S sniffy -B build-tests -DSNIFFY_BUILD_ARBGENERATOR_TESTS=ON
+cmake --build build-tests --target arbgenerator_tests
+ctest --test-dir build-tests --output-on-failure -R arbgenerator_tests
+```
+
+Use the application's Qt/toolchain settings and put Qt, compiler-runtime, libusb,
+and ST-Link DLL directories on `PATH` on Windows. The offscreen tests cover linear
+and exponential saw/up-down sweep values, endpoints and per-leg timing, independent
+channel updates, CH1-master synchronization, the shared firmware sampling-frequency
+command, timer shutdown, vertical Sweep-tab layout, and saved-session compatibility.
+No connected board is required. Actual phase stability and DAC/PWM timing still
+require hardware measurements.
+
 ## Pattern generator
 
 Configure with the same Qt/toolchain settings as the application:

@@ -2,6 +2,19 @@
 #define ARBGENERATORDEFS_H
 
 #define MAX_ARB_CHANNELS_NUM 4
+#define MAX_SWEEP_CHANNELS_NUM 2
+
+enum class SweepScale
+{
+    LINEAR = 0,
+    EXPONENTIAL = 1
+};
+
+enum class SweepMode
+{
+    SAW = 0,
+    SYMMETRIC = 1
+};
 
 enum class SignalShape
 {

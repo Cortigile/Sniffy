@@ -480,8 +480,8 @@ frequency per channel.
 | `sniffy_arbgen_set_phase` | `module`, `channel` (0-3), `value` (°) | Phase 0-360 degrees |
 | `sniffy_arbgen_set_channels` | `module`, `count` (1-4) | Number of active output channels |
 | `sniffy_arbgen_set_memory` | `module`, `mode`, opt `length` | 0=Best fit, 1=Long, 2=Custom. For Custom supply `length` (samples). |
-| `sniffy_arbgen_set_sweep` | `module`, `enable` (bool), opt `min_freq`, `max_freq`, `sweep_time` | SW frequency sweep on CH1. Freq in Hz, time in seconds. |
-| `sniffy_arbgen_set_freq_sync` | `module`, `channel` (1-3), `enabled` (bool) | Sync CH2/3/4 signal frequency to CH1. Channel: 1=CH2, 2=CH3, 3=CH4. |
+| `sniffy_arbgen_set_sweep` | `module`, `enable` (bool), opt `min_freq`, `max_freq`, `sweep_time`, `channel` (0/1, default 0), `scale` (linear/exponential), `mode` (saw/symmetric) | Independent CH1/CH2 SW sweep. Freq 0.01–1e6 Hz, min <= max; time 0.1–60 seconds per leg (symmetric cycle = 2T). |
+| `sniffy_arbgen_set_freq_sync` | `module`, `channel` (1-3), `enabled` (bool) | Sync CH2/3/4 signal frequency to CH1. Channel: 1=CH2, 2=CH3, 3=CH4. CH2 follows CH1/master when enabled. Disable sync before editing CH2 sweep. |
 
 #### PWM generator only
 
@@ -498,11 +498,33 @@ frequency per channel.
 > is disabled and locked to CH1's value.  The same applies to PWM Freq
 > sync for the PWM carrier frequency.
 
+Sweeps are independent for channel **0=CH1** and **1=CH2** only. The original
+`arbgen_set_sweep(module, enable, min_freq, max_freq, sweep_time)` positional
+call still targets CH1; `channel`, `scale`, and `mode` are appended optional
+arguments in Python/CLI. Omitted scale/mode retain the channel's settings.
+Saw mode resets after the upward leg; symmetric mode sweeps up then down,
+so a complete cycle lasts twice `sweep_time`. Numeric options are applied
+when enabling; legacy zero defaults are omitted.
+
+The bridge validates channel, enums, frequency/time bounds, and min <= max.
+It rejects **all sweep edits on synced CH2**, including disable requests.
+First call `arbgen_set_freq_sync(module, 1, False)`. With sync enabled,
+CH2 follows CH1/master's frequency/sweep, preserving existing common firmware
+timer updates. There is no separate sweep-sync tool.
+
+```bash
+python -m sniffy_mcp call arbgen_set_freq_sync "Arb. generator" 1 false
+python -m sniffy_mcp call arbgen_set_sweep "Arb. generator" true 100 10000 5 channel=1 scale=exponential mode=symmetric
+python -m sniffy_mcp call arbgen_set_sweep "Arb. generator" false channel=1
+```
+
 **State readback** (`sniffy_get_module_state`):
 `num_channels`, `memory` (best_fit/long/custom), `custom_length` (if custom),
-`sweep_enabled`, `sweep_min_freq`, `sweep_max_freq`, `sweep_time`,
+`sweep_enabled`, `sweep_min_freq`, `sweep_max_freq`, `sweep_time` (CH1 aliases),
 per-channel: `shape`/`shape_name` (sine/saw/rect/arb), `frequency`,
 `amplitude`, `offset`, `duty`, `phase`, `freq_sync_ch1` (CH2+ only).
+For `i < 2`, `channels[i].sweep` adds `enabled`, `active`, `min_freq`,
+`max_freq`, `sweep_time` (seconds per leg), `scale`, and `mode`.
 PWM generator adds per-channel: `pwm_frequency`, `pwm_freq_sync_ch1` (CH2+ only).
 
 ### Pattern Generator
