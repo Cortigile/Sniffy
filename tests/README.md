@@ -39,6 +39,22 @@ configuration compatibility, session and mode restoration, input-selection limit
 counts, memory-limited period options, and reference/multimode capture sequencing.
 Voltage tests inject synthetic measurements; physical ADC settling and accuracy still need board testing.
 
+## Pattern generator
+
+Configure with the same Qt/toolchain settings as the application:
+
+```powershell
+cmake -S sniffy -B build-tests -DSNIFFY_BUILD_PATTERNGENERATOR_TESTS=ON
+cmake --build build-tests --target patterngenerator_tests
+ctest --test-dir build-tests --output-on-failure -R patterngenerator_tests
+```
+
+The Qt, compiler-runtime, libusb, and ST-Link DLL directories must be on `PATH` on
+Windows. Tests run offscreen without a connected board and cover user-defined grid
+edits across length changes, restoration of temporarily hidden ticks, pattern
+switching, reset of visible and hidden edits without changing the tick count, and
+unchanged regeneration of counter, binary, and Gray-code patterns.
+
 ## Updater
 
 Run from the repository root in Windows PowerShell 5.1 with matching Qt/MinGW toolchains.

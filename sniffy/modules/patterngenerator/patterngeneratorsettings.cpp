@@ -433,7 +433,8 @@ void PatternGeneratorSettings::resetPatternCallback(int index)
 
 void PatternGeneratorSettings::resetUserDefinedComponents()
 {
-    resetFreqAndDataLenDials(dialUserDefFreq, dialUserDefLength);
+    dialUserDefFreq->setRealValue(PATT_DEFAULT_GEN_FREQ, true);
+    config->freq[config->pattIndex] = dialUserDefFreq->getRealValue();
 }
 
 void PatternGeneratorSettings::resetCounterComponents()
