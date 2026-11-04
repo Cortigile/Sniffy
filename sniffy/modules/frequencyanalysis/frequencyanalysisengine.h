@@ -105,7 +105,18 @@ struct Result {
     double referenceRms = 0;
     double responseRms = 0;
     double coherence = 0;
+    int averages = 0;
 };
+
+struct Uncertainty {
+    double relativeMagnitude = 0;
+    double gainDb = 0;
+    double phaseDegrees = 0;
+};
+
+// Approximate H1 random standard errors (one sigma), assuming independent
+// averages. Coherence is magnitude squared; this excludes systematic errors.
+bool estimateUncertainty(const Result &, Uncertainty &, QString &error);
 
 // Use one instance per sweep point (clear between frequencies).
 // H1 = sum(Y * exp(-i*2*pi*f*skew) * conj(X)) / sum(|X|^2).

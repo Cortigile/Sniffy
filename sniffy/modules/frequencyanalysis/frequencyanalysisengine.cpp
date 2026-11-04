@@ -391,6 +391,23 @@ bool extractTone(const QVector<double> &volts, double f, double rate, Tone &tone
     return true;
 }
 
+bool estimateUncertainty(const Result &result, Uncertainty &uncertainty, QString &error)
+{
+    uncertainty = {};
+    error.clear();
+    if (!std::isfinite(result.coherence) || result.coherence < 0 || result.coherence > 1)
+        return fail(error, "Coherence must be finite and in [0, 1].");
+    if (result.averages < 2)
+        return fail(error, "At least two independent averages are required.");
+    if (result.coherence == 0)
+        return fail(error, "Zero coherence has no finite uncertainty estimate.");
+    // sqrt((1-C)/(2*N*C)), arranged to avoid overflowing 1/C near zero.
+    const double relative = std::sqrt(1 - result.coherence) / std::sqrt(result.coherence)
+        / std::sqrt(2.0 * result.averages);
+    uncertainty = {relative, 20 / std::log(10.0) * relative, 180 / pi * relative};
+    return true;
+}
+
 void Averager::clear()
 {
     m_count = 0;
@@ -462,6 +479,7 @@ bool Averager::result(Result &result, QString &error) const
     calculated.responseRms = double(m_scale * std::sqrt(m_sumYY / (2 * static_cast<long double>(m_count))));
     const long double correlation = crossMagnitude / std::sqrt(m_sumXX) / std::sqrt(m_sumYY);
     calculated.coherence = m_count == 1 ? 1 : double(std::clamp(correlation * correlation, 0.0L, 1.0L));
+    calculated.averages = m_count;
     if (!std::isfinite(calculated.gainDb) || !std::isfinite(calculated.phaseDegrees)
         || !std::isfinite(calculated.referenceRms) || !std::isfinite(calculated.responseRms)
         || !std::isfinite(calculated.coherence))

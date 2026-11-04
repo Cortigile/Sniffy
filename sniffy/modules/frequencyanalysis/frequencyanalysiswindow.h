@@ -5,12 +5,14 @@
 
 #include <QByteArray>
 #include <QJsonObject>
+#include <QList>
 #include <QStringList>
 #include <QVector>
 #include <QWidget>
 #include <optional>
 
 class QAbstractAxis;
+class QAreaSeries;
 class QChart;
 class QLabel;
 class QLineSeries;
@@ -32,6 +34,7 @@ public:
 
     FrequencyAnalysis::Settings settings() const;
     QByteArray serialize() const;
+    QByteArray csvData() const;
     bool restore(const QByteArray &data, QString &error);
     void setRunning(bool running);
     void setStatus(const QString &status, bool error = false);
@@ -64,6 +67,8 @@ private:
         QString referencePin;
         QString responsePin;
         QString dacPin;
+        std::optional<FrequencyAnalysis::Uncertainty> uncertainty;
+        QString uncertaintyReason;
     };
     struct CursorReading {
         double frequency, gain, phase;
@@ -86,6 +91,7 @@ private:
     WidgetButtons *m_unwrapPhase;
     WidgetButtons *m_showCursors;
     WidgetButtons *m_combinedPlot;
+    WidgetButtons *m_showUncertainty;
     widgetTab *m_settingsTabs;
     WidgetSelection *m_referenceSelection;
     WidgetSelection *m_responseSelection;
@@ -107,6 +113,8 @@ private:
     FrequencyAnalysisChartView *m_phaseView;
     QLineSeries *m_gainSeries;
     QLineSeries *m_phaseSeries;
+    QList<QAreaSeries *> m_gainBands;
+    QList<QAreaSeries *> m_phaseBands;
     QAbstractAxis *m_gainFrequencyAxis = nullptr;
     QAbstractAxis *m_phaseFrequencyAxis = nullptr;
     QValueAxis *m_gainAxis;
@@ -154,6 +162,8 @@ private:
     void updatePlotRanges();
     void updatePhasePlot();
     void updatePlotLayout();
+    void clearUncertaintyBands();
+    void updateUncertaintyBands();
     void moveCursor(int cursor, double frequency);
     void updateCursors();
     void exportCsv();

@@ -19,6 +19,8 @@
 #include <QGraphicsSimpleTextItem>
 #include <QtCharts/QLegend>
 #include <QtCharts/QChartView>
+#include <QtCharts/QAreaSeries>
+#include <QtCharts/QLegendMarker>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QLogValueAxis>
 #include <QtCharts/QValueAxis>
@@ -133,6 +135,15 @@ QByteArray binaryCommand(const QByteArray &command, quint32 value)
 {
     const quint32 encoded = qToLittleEndian(value);
     return command + QByteArray(reinterpret_cast<const char *>(&encoded), 4) + ";";
+}
+
+QList<QAreaSeries *> uncertaintyBands(QChart *chart)
+{
+    QList<QAreaSeries *> bands;
+    for (auto *series : chart->series())
+        if (auto *band = qobject_cast<QAreaSeries *>(series))
+            bands.append(band);
+    return bands;
 }
 }
 
@@ -436,12 +447,23 @@ private slots:
         QCOMPARE(tabWidget->tabText(1), QString("Acquisition"));
         QCOMPARE(tabWidget->tabText(2), QString("Connection"));
         QCOMPARE(tabWidget->tabText(3), QString("View"));
+        for (int tab = 0; tab < tabWidget->count(); ++tab) {
+            auto *layout = tabs->getLayout(tab);
+            QCOMPARE(layout->contentsMargins().top(), 5);
+            tabWidget->setCurrentIndex(tab);
+            QApplication::processEvents();
+            auto *firstControl = layout->itemAt(0)->widget();
+            QVERIFY(firstControl && firstControl->isVisible());
+            QCOMPARE(firstControl->y(), 5);
+        }
+        tabWidget->setCurrentIndex(0);
+        QApplication::processEvents();
         auto *viewSettings = window->findChild<QWidget *>("viewSettings");
         QVERIFY(viewSettings);
         QVERIFY(tabWidget->widget(3)->isAncestorOf(viewSettings));
         auto *resultTabs = window->findChild<QTabWidget *>("frequencyAnalysisResultTabs");
         QVERIFY(resultTabs);
-        for (const auto &name : {"unwrapPhase", "showCursors", "combinedPlot"}) {
+        for (const auto &name : {"unwrapPhase", "showCursors", "combinedPlot", "showUncertainty"}) {
             auto *control = window->findChild<WidgetButtons *>(name);
             QVERIFY(control);
             QVERIFY(viewSettings->isAncestorOf(control));
@@ -475,6 +497,212 @@ private slots:
         QTest::addColumn<bool>("running");
         QTest::newRow("idle") << false;
         QTest::newRow("sweeping") << true;
+    }
+
+    void uncertaintyBandsFollowDisplay_data()
+    {
+        QTest::addColumn<bool>("linear");
+        QTest::addColumn<bool>("combined");
+        QTest::newRow("separate-logarithmic") << false << false;
+        QTest::newRow("separate-linear") << true << false;
+        QTest::newRow("combined-logarithmic") << false << true;
+        QTest::newRow("combined-linear") << true << true;
+    }
+
+    void uncertaintyBandsFollowDisplay()
+    {
+        QFETCH(bool, linear);
+        QFETCH(bool, combined);
+        FrequencyAnalysisWindow window;
+        window.resize(1250, 850);
+        window.show();
+        if (linear)
+            window.findChild<WidgetButtons *>("frequencySpacing")->clickedInternal(1);
+        window.clearResults();
+        auto *toggle = window.findChild<WidgetButtons *>("showUncertainty");
+        QVERIFY(toggle && !toggle->isChecked(0));
+        QVERIFY(toggle->getText(0).contains(QStringLiteral("\u00b13\u03c3")));
+        QVERIFY(!window.findChild<QLabel *>("frequencyUncertaintyHint"));
+        auto *gain = window.findChild<QChartView *>("frequencyGainPlot");
+        auto *phase = window.findChild<QChartView *>("frequencyPhasePlot");
+        auto *phaseTrace = qobject_cast<QLineSeries *>(phase->chart()->series().first());
+        QVERIFY(gain && phase && phaseTrace);
+        FrequencyAnalysis::Result result;
+        result.coherence = 0.8;
+        result.averages = 8;
+        result.gainDb = -6;
+        result.phaseDegrees = -30;
+        for (const double frequency : {99.5, 999.5, 9999.5})
+            window.appendResult(frequency + 0.5, frequency, 1, 320000, 2048, result);
+        const auto measurements = window.state().value("results");
+        QVERIFY(uncertaintyBands(gain->chart()).isEmpty());
+        auto *tabs = window.findChild<widgetTab *>("frequencyAnalysisSettings")->findChild<QTabWidget *>();
+        tabs->setCurrentIndex(3);
+        window.setRunning(true);
+        QApplication::processEvents();
+        QVERIFY(toggle->isVisible() && toggle->isEnabled());
+        QTest::mouseClick(toggle->findChild<QPushButton *>("pushButton_1"), Qt::LeftButton);
+        if (combined)
+            window.findChild<WidgetButtons *>("combinedPlot")->findChild<QPushButton *>("pushButton_1")->click();
+        const double gainError = 20 / std::log(10.0) * 0.125;
+        const double phaseError = 180 / std::acos(-1.0) * 0.125;
+        const auto verify = [&] {
+            const auto gainBands = uncertaintyBands(gain->chart());
+            const auto phaseBands = uncertaintyBands(phase->chart());
+            const bool together = phaseTrace->chart() == gain->chart();
+            QCOMPARE(gainBands.size(), together ? 2 : 1);
+            QCOMPARE(phaseBands.size(), together ? 0 : 1);
+            for (auto *band : gainBands + phaseBands) {
+                const bool gainBand = band->objectName() == "frequencyGainUncertainty";
+                const auto lower = band->lowerSeries()->points();
+                const auto upper = band->upperSeries()->points();
+                QCOMPARE(lower.size(), 3);
+                QCOMPARE(upper.size(), 3);
+                QCOMPARE(lower.first().x(), 99.5);
+                QCOMPARE(upper.last().x(), 9999.5);
+                const double center = gainBand ? -6 : -30;
+                const double error = 3 * (gainBand ? gainError : phaseError);
+                QVERIFY(qAbs(lower.first().y() - (center - error)) < 1e-10);
+                QVERIFY(qAbs(upper.first().y() - (center + error)) < 1e-10);
+                auto color = QColor(Graphics::getChannelColor(0));
+                color.setAlpha(band->brush().color().alpha());
+                QCOMPARE(band->brush().color(), color);
+                QVERIFY(color.alpha() > 0 && color.alpha() < 128);
+                QCOMPARE(band->pen().style(), Qt::NoPen);
+                QCOMPARE(band->attachedAxes().size(), 2);
+                for (auto *axis : band->attachedAxes()) {
+                    if (axis->orientation() == Qt::Vertical) {
+                        auto *valueAxis = qobject_cast<QValueAxis *>(axis);
+                        QVERIFY(valueAxis);
+                        QVERIFY(valueAxis->min() <= center - error);
+                        QVERIFY(valueAxis->max() >= center + error);
+                        QCOMPARE(axis->alignment(), !gainBand && together ? Qt::AlignRight : Qt::AlignLeft);
+                    } else {
+                        QCOMPARE(axis, gainBand || together ? gain->chart()->axes(Qt::Horizontal).first()
+                                                           : phase->chart()->axes(Qt::Horizontal).first());
+                    }
+                }
+                for (auto *marker : band->chart()->legend()->markers(band))
+                    QVERIFY(!marker->isVisible());
+            }
+        };
+        verify();
+        window.setRunning(false);
+        window.findChild<WidgetDialRange *>("averages")->setRealValue(128);
+        toggle->findChild<QPushButton *>("pushButton_1")->click();
+        QVERIFY(uncertaintyBands(gain->chart()).isEmpty());
+        QVERIFY(uncertaintyBands(phase->chart()).isEmpty());
+        toggle->findChild<QPushButton *>("pushButton_1")->click();
+        verify();
+        window.findChild<WidgetButtons *>("combinedPlot")->findChild<QPushButton *>("pushButton_1")->click();
+        verify();
+        QCOMPARE(window.state().value("results"), measurements);
+        const auto first = measurements.toArray().first().toObject();
+        QCOMPARE(first.value("averages").toInt(), 8);
+        const auto estimate = first.value("uncertainty").toObject();
+        QVERIFY(estimate.value("available").toBool());
+        QCOMPARE(estimate.value("standard_deviations").toInt(), 3);
+        QVERIFY(qAbs(estimate.value("gain_stddev_db").toDouble() - gainError) < 1e-10);
+        QVERIFY(qAbs(estimate.value("phase_stddev_degrees").toDouble() - phaseError) < 1e-10);
+        QVERIFY(qAbs(estimate.value("gain_half_width_db").toDouble() - 3 * gainError) < 1e-10);
+        QVERIFY(qAbs(estimate.value("phase_half_width_degrees").toDouble() - 3 * phaseError) < 1e-10);
+        auto *table = window.findChild<QTableWidget *>("frequencyAnalysisResults");
+        QCOMPARE(table->columnCount(), 16);
+        QCOMPARE(table->item(0, 15)->text(), QString("8"));
+        const auto csv = window.csvData().split('\n');
+        QCOMPARE(csv.first().split(',').size(), 19);
+        const auto fields = csv.at(1).split(',');
+        QCOMPARE(fields.size(), 19);
+        QCOMPARE(fields.at(15), QByteArray("8"));
+        QVERIFY(qAbs(fields.at(16).toDouble() - gainError) < 1e-10);
+        QVERIFY(qAbs(fields.at(17).toDouble() - phaseError) < 1e-10);
+        QCOMPARE(fields.at(18), QByteArray("approximate_random_1_sigma"));
+        QApplication::processEvents();
+        const QString snapshot = QString::fromLocal8Bit(qgetenv("SNIFFY_FREQ_UNCERTAINTY_UI_SNAPSHOT"));
+        if (!snapshot.isEmpty()) {
+            QTest::qWait(50);
+            QVERIFY(window.grab().save(snapshot));
+        }
+        window.clearResults();
+        QVERIFY(uncertaintyBands(gain->chart()).isEmpty());
+        QVERIFY(uncertaintyBands(phase->chart()).isEmpty());
+        window.appendResult(100, 100, 1, 3200, 2048, result);
+        QVERIFY(uncertaintyBands(gain->chart()).isEmpty());
+        window.appendResult(1000, 1000, 1, 32000, 2048, result);
+        QCOMPARE(uncertaintyBands(gain->chart()).size()
+                 + uncertaintyBands(phase->chart()).size(), 2);
+    }
+
+    void uncertaintyGapsAndPhaseWrapping()
+    {
+        FrequencyAnalysisWindow window;
+        auto *gain = window.findChild<QChartView *>("frequencyGainPlot");
+        auto *phase = window.findChild<QChartView *>("frequencyPhasePlot");
+        auto *toggle = window.findChild<WidgetButtons *>("showUncertainty");
+        toggle->findChild<QPushButton *>("pushButton_1")->click();
+        FrequencyAnalysis::Result result;
+        result.averages = 8;
+        result.coherence = 0.8;
+        result.phaseDegrees = 179;
+        for (int i = 1; i <= 8; ++i) {
+            if (i == 3)
+                result.averages = 1;
+            else
+                result.averages = 8;
+            result.coherence = i == 6 ? 0 : 0.8;
+            result.phaseDegrees = i <= 4 ? 179 : -179;
+            window.appendResult(i * 100, i * 100, 1, 32000, 2048, result);
+        }
+        QCOMPARE(uncertaintyBands(gain->chart()).size(), 3);
+        QCOMPARE(uncertaintyBands(phase->chart()).size(), 3);
+        const auto original = window.state().value("results");
+        const auto missing = original.toArray().at(2).toObject().value("uncertainty").toObject();
+        QVERIFY(!missing.value("available").toBool());
+        QVERIFY(missing.value("reason").toString().contains("two"));
+        const auto zero = original.toArray().at(5).toObject().value("uncertainty").toObject();
+        QVERIFY(!zero.value("available").toBool());
+        QVERIFY(zero.value("reason").toString().contains("Zero coherence"));
+        QVERIFY(!window.findChild<QLabel *>("frequencyUncertaintyHint"));
+        auto *unwrap = window.findChild<WidgetButtons *>("unwrapPhase");
+        unwrap->findChild<QPushButton *>("pushButton_1")->click();
+        QCOMPARE(uncertaintyBands(phase->chart()).size(), 2);
+        for (auto *band : uncertaintyBands(phase->chart())) {
+            for (const auto &point : band->lowerSeries()->points())
+                QVERIFY(point.y() >= -180);
+            for (const auto &point : band->upperSeries()->points())
+                QVERIFY(point.y() <= 180);
+        }
+        QCOMPARE(window.state().value("results"), original);
+        const auto csv = window.csvData().split('\n');
+        const auto missingFields = csv.at(3).split(',');
+        QVERIFY(missingFields.at(16).isEmpty() && missingFields.at(17).isEmpty());
+        QVERIFY(!missingFields.at(18).isEmpty());
+        unwrap->findChild<QPushButton *>("pushButton_1")->click();
+        QCOMPARE(uncertaintyBands(phase->chart()).size(), 3);
+    }
+
+    void uncertaintyPreferenceIsPersistent()
+    {
+        FrequencyAnalysisWindow window;
+        const auto off = window.serialize();
+        auto *toggle = window.findChild<WidgetButtons *>("showUncertainty");
+        toggle->findChild<QPushButton *>("pushButton_1")->click();
+        const auto on = window.serialize();
+        FrequencyAnalysisWindow restored;
+        QString error;
+        QVERIFY2(restored.restore(on, error), qPrintable(error));
+        QVERIFY(restored.findChild<WidgetButtons *>("showUncertainty")->isChecked(0));
+        QCOMPARE(restored.serialize(), on);
+        auto root = QJsonDocument::fromJson(on).object();
+        auto settings = root.value("settings").toObject();
+        settings["showUncertainty"] = "invalid";
+        root["settings"] = settings;
+        QVERIFY(!restored.restore(QJsonDocument(root).toJson(), error));
+        QCOMPARE(restored.serialize(), on);
+        settings.remove("showUncertainty");
+        root["settings"] = settings;
+        QVERIFY2(restored.restore(QJsonDocument(root).toJson(), error), qPrintable(error));
+        QCOMPARE(restored.serialize(), off);
     }
 
     void viewControlsStayInteractive()
@@ -799,6 +1027,61 @@ private slots:
         QCOMPARE(restoredGain->chart()->series().size(), 1);
     }
 
+    void cursorFrequenciesUseEngineeringUnits_data()
+    {
+        QTest::addColumn<double>("frequencyA");
+        QTest::addColumn<double>("frequencyB");
+        QTest::addColumn<QString>("expectedA");
+        QTest::addColumn<QString>("expectedB");
+        QTest::addColumn<QString>("expectedDelta");
+        QTest::newRow("hertz") << 12.3456 << 987.6544
+            << QString("12.346 Hz") << QString("987.654 Hz") << QString("975.309 Hz");
+        QTest::newRow("kilohertz") << 1234.56789 << 98765.4321
+            << QString("1.235 kHz") << QString("98.765 kHz") << QString("97.531 kHz");
+        QTest::newRow("megahertz") << 1234567.89 << 9876543.21
+            << QString("1.235 MHz") << QString("9.877 MHz") << QString("8.642 MHz");
+        QTest::newRow("millihertz") << 0.001234567 << 0.123456789
+            << QString("1.235 mHz") << QString("123.457 mHz") << QString("122.222 mHz");
+        QTest::newRow("microhertz") << 0.000001234567 << 0.000987654321
+            << QString("1.235 uHz") << QString("987.654 uHz") << QString("986.420 uHz");
+        QTest::newRow("kilohertz-boundary") << 999.5 << 1000.0
+            << QString("999.500 Hz") << QString("1.000 kHz") << QString("500.000 mHz");
+        QTest::newRow("megahertz-boundary") << 999999.0 << 1000000.0
+            << QString("999.999 kHz") << QString("1.000 MHz") << QString("1.000 Hz");
+        QTest::newRow("negative-delta") << 98765.4321 << 1234.56789
+            << QString("98.765 kHz") << QString("1.235 kHz") << QString("-97.531 kHz");
+        QTest::newRow("zero-delta") << 125.0 << 125.0
+            << QString("125.000 Hz") << QString("125.000 Hz") << QString("0.000 Hz");
+        QTest::newRow("tiny-delta") << 1000.0 << 1000.000000000001
+            << QString("1.000 kHz") << QString("1.000 kHz") << QString("0.000 Hz");
+    }
+
+    void cursorFrequenciesUseEngineeringUnits()
+    {
+        QFETCH(double, frequencyA);
+        QFETCH(double, frequencyB);
+        QFETCH(QString, expectedA);
+        QFETCH(QString, expectedB);
+        QFETCH(QString, expectedDelta);
+        FrequencyAnalysisWindow window;
+        FrequencyAnalysis::Result result;
+        window.appendResult(frequencyA, frequencyA, 1, 1000000, 2048, result);
+        window.appendResult(frequencyB, frequencyB, 1, 1000000, 2048, result);
+        QCOMPARE(window.findChild<QLabel *>("frequencyCursorAReadout")->text().section(" | ", 0, 0),
+                 QString("A: ") + expectedA);
+        QCOMPARE(window.findChild<QLabel *>("frequencyCursorBReadout")->text().section(" | ", 0, 0),
+                 QString("B: ") + expectedB);
+        QCOMPARE(window.findChild<QLabel *>("frequencyCursorDifference")->text().section(" | ", 0, 0),
+                 QString("B \u2212 A: ") + expectedDelta);
+        const auto cursors = window.state().value("cursors").toObject();
+        QCOMPARE(cursors.value("a").toObject().value("frequency_hz").toDouble(), frequencyA);
+        QCOMPARE(cursors.value("b").toObject().value("frequency_hz").toDouble(), frequencyB);
+        QCOMPARE(cursors.value("delta").toObject().value("frequency_hz").toDouble(), frequencyB - frequencyA);
+        const auto csv = window.csvData().split('\n');
+        QCOMPARE(csv.at(1).split(',').at(1).toDouble(), frequencyA);
+        QCOMPARE(csv.at(2).split(',').at(1).toDouble(), frequencyB);
+    }
+
     void draggingCursors_data()
     {
         QTest::addColumn<bool>("linear");
@@ -967,9 +1250,11 @@ private slots:
         QTest::addColumn<int>("rate");
         QTest::addColumn<int>("samples");
         QTest::addColumn<bool>("alias");
-        QTest::newRow("direct") << 1000.0 << 32000 << 1024 << false;
-        QTest::newRow("negative-alias") << 1000000.0 << 1010000 << 4096 << true;
-        QTest::newRow("positive-alias") << 1000000.0 << 990000 << 4096 << true;
+        QTest::addColumn<int>("averages");
+        QTest::newRow("direct") << 1000.0 << 32000 << 1024 << false << 1;
+        QTest::newRow("negative-alias") << 1000000.0 << 1010000 << 4096 << true << 1;
+        QTest::newRow("positive-alias") << 1000000.0 << 990000 << 4096 << true << 1;
+        QTest::newRow("four-averages") << 1000.0 << 32000 << 1024 << false << 4;
     }
 
     void gainAndPhaseFromScope()
@@ -978,10 +1263,11 @@ private slots:
         QFETCH(int, rate);
         QFETCH(int, samples);
         QFETCH(bool, alias);
+        QFETCH(int, averages);
         Rig rig;
         rig.module.widgetControlClicked(ModuleStatus::STOP);
         rig.module.settings = FrequencyAnalysis::Settings{};
-        rig.module.settings.averages = 1;
+        rig.module.settings.averages = averages;
         rig.module.settings.periods = 32;
         rig.module.settings.allowAliasing = alias;
         rig.module.points = {{frequency, 1}};
@@ -989,14 +1275,18 @@ private slots:
         rig.module.sampling.requestedRate = rate;
         rig.module.sampling.samples = samples;
         rig.module.state = FrequencyAnalysisModule::State::Capturing;
-        rig.module.captureStarted = true;
-        rig.module.acceptCapture(frame(samples, rate, frequency));
+        for (int record = 0; record < averages; ++record) {
+            rig.module.captureStarted = true;
+            rig.module.acceptCapture(frame(samples, rate, frequency));
+        }
         const auto results = view(rig)->state().value("results").toArray();
         QCOMPARE(results.size(), 1);
         const auto result = results[0].toObject();
         QVERIFY(qAbs(result.value("gain_db").toDouble() + 6.0206) < 0.03);
         QVERIFY(qAbs(result.value("phase_degrees").toDouble() + 45) < 0.2);
         QCOMPARE(result.value("sampling_rate_hz").toInt(), rate);
+        QCOMPARE(result.value("averages").toInt(), averages);
+        QCOMPARE(result.value("uncertainty").toObject().value("available").toBool(), averages >= 2);
         QCOMPARE(rig.module.state, FrequencyAnalysisModule::State::Draining);
         completeReadback(rig, 32000);
         QCOMPARE(rig.module.state, FrequencyAnalysisModule::State::Idle);

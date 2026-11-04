@@ -706,7 +706,7 @@ void FrequencyAnalysisModule::acceptCapture(const QByteArray &data)
     actualRate = rate;
     const double observedCycles = sampling.samples
         * std::abs(std::remainder(actualFrequency, double(rate))) / rate;
-    periodTargetLimited = periodTargetLimited || observedCycles < settings.periods * (1 - 1e-9);
+    periodTargetLimited = periodTargetLimited || observedCycles < settings.periods * 0.95;
     const auto referenceRange = std::minmax_element(reference.cbegin(), reference.cend());
     if (*referenceRange.second - *referenceRange.first < 8 * adcStep) {
         finish(tr("Reference signal is missing or below eight ADC counts peak-to-peak."), true);

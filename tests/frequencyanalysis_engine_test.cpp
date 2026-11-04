@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <limits>
+#include <random>
 
 using namespace FrequencyAnalysis;
 
@@ -566,6 +567,7 @@ private slots:
         QVERIFY(std::abs(result.gainDb) < 1e-12);
         QVERIFY(std::abs(result.phaseDegrees) < 1e-12);
         QVERIFY(std::abs(result.coherence - 0.8) < 1e-12);
+        QCOMPARE(result.averages, 8);
         QVERIFY(std::abs(result.referenceRms - std::sqrt(0.5)) < 1e-12);
         QVERIFY(std::abs(result.responseRms - std::sqrt(1.25 / 2)) < 1e-12);
 
@@ -575,6 +577,95 @@ private slots:
         QVERIFY2(average.result(result, error), qPrintable(error));
         // H1 is power weighted: (1*1 + 6*2)/(1 + 4), not mean(1, 3).
         QVERIFY(std::abs(result.gainDb - 20 * std::log10(13.0 / 5)) < 1e-12);
+        QCOMPARE(result.averages, 2);
+    }
+
+    void coherenceUncertainty_data()
+    {
+        QTest::addColumn<double>("coherence");
+        QTest::addColumn<int>("averages");
+        QTest::addColumn<double>("relative");
+        QTest::newRow("perfect") << 1.0 << 2 << 0.0;
+        QTest::newRow("eighty-percent") << 0.8 << 8 << 0.125;
+        QTest::newRow("four-times-the-averages") << 0.8 << 32 << 0.0625;
+        QTest::newRow("lower-coherence") << 0.5 << 4 << std::sqrt(0.125);
+    }
+
+    void coherenceUncertainty()
+    {
+        QFETCH(double, coherence);
+        QFETCH(int, averages);
+        QFETCH(double, relative);
+        Result result;
+        result.coherence = coherence;
+        result.averages = averages;
+        Uncertainty uncertainty;
+        QString error;
+        QVERIFY2(estimateUncertainty(result, uncertainty, error), qPrintable(error));
+        QVERIFY(error.isEmpty());
+        QVERIFY(std::abs(uncertainty.relativeMagnitude - relative) < 1e-14);
+        QVERIFY(std::abs(uncertainty.gainDb - 20 / std::log(10.0) * relative) < 1e-12);
+        QVERIFY(std::abs(uncertainty.phaseDegrees - 180 / pi * relative) < 1e-12);
+        result.coherence = std::numeric_limits<double>::denorm_min();
+        QVERIFY2(estimateUncertainty(result, uncertainty, error), qPrintable(error));
+        QVERIFY(std::isfinite(uncertainty.gainDb) && std::isfinite(uncertainty.phaseDegrees));
+        QVERIFY(uncertainty.relativeMagnitude > 1e150);
+    }
+
+    void uncertaintyUnavailableCases()
+    {
+        for (const auto &entry : QList<QPair<double, int>>{
+                 {1, 0}, {1, 1}, {0.8, -1}, {0, 8}, {-0.1, 8}, {1.1, 8},
+                 {std::numeric_limits<double>::quiet_NaN(), 8},
+                 {std::numeric_limits<double>::infinity(), 8}}) {
+            Result result;
+            result.coherence = entry.first;
+            result.averages = entry.second;
+            Uncertainty uncertainty{1, 1, 1};
+            QString error;
+            QVERIFY(!estimateUncertainty(result, uncertainty, error));
+            QVERIFY(!error.isEmpty());
+            QCOMPARE(uncertainty.relativeMagnitude, 0.0);
+            QCOMPARE(uncertainty.gainDb, 0.0);
+            QCOMPARE(uncertainty.phaseDegrees, 0.0);
+        }
+        Averager average;
+        QString error;
+        QVERIFY(average.add(phasor({1, 0}), phasor({1, 0}), 1000, 0, error));
+        Result result;
+        QVERIFY(average.result(result, error));
+        QCOMPARE(result.coherence, 1.0);
+        QCOMPARE(result.averages, 1);
+        Uncertainty uncertainty;
+        QVERIFY(!estimateUncertainty(result, uncertainty, error));
+    }
+
+    void uncertaintyMatchesIndependentNoiseScatter()
+    {
+        std::mt19937 random(45678);
+        std::normal_distribution<double> noise(0, std::sqrt(0.125));
+        constexpr int trials = 600;
+        double gainSquared = 0, phaseSquared = 0, predictedGainSquared = 0, predictedPhaseSquared = 0;
+        for (int trial = 0; trial < trials; ++trial) {
+            Averager average;
+            QString error;
+            for (int record = 0; record < 64; ++record) {
+                const auto x = std::polar(1.0, record * 0.73);
+                const auto y = x + std::complex<double>(noise(random), noise(random));
+                QVERIFY(average.add(phasor(x), phasor(y), 1000, 0, error));
+            }
+            Result result;
+            Uncertainty uncertainty;
+            QVERIFY(average.result(result, error));
+            QVERIFY(estimateUncertainty(result, uncertainty, error));
+            QCOMPARE(result.averages, 64);
+            gainSquared += result.gainDb * result.gainDb;
+            phaseSquared += result.phaseDegrees * result.phaseDegrees;
+            predictedGainSquared += uncertainty.gainDb * uncertainty.gainDb;
+            predictedPhaseSquared += uncertainty.phaseDegrees * uncertainty.phaseDegrees;
+        }
+        QVERIFY(std::abs(std::sqrt(gainSquared / predictedGainSquared) - 1) < 0.15);
+        QVERIFY(std::abs(std::sqrt(phaseSquared / predictedPhaseSquared) - 1) < 0.15);
     }
 
     void averagerRangeAndInvalids()

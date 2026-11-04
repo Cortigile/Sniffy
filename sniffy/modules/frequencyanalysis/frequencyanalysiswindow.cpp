@@ -5,11 +5,14 @@
 #include "gui/widgetselection.h"
 #include "gui/widgettab.h"
 #include "modules/adcinputcatalog.h"
+#include "modules/labelformator.h"
 
 #include <QtCharts/QAbstractAxis>
+#include <QtCharts/QAreaSeries>
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
 #include <QtCharts/QLegend>
+#include <QtCharts/QLegendMarker>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QLogValueAxis>
 #include <QtCharts/QValueAxis>
@@ -50,6 +53,7 @@ constexpr int minimumPeriods = 16;
 constexpr int maximumPeriods = FrequencyAnalysis::maximumPeriods;
 constexpr int maximumSettlingMs = FrequencyAnalysis::maximumSettlingMs;
 constexpr int maximumInputSelector = 255;
+constexpr int uncertaintyBandSigma = 3;
 
 QString number(double value)
 {
@@ -95,6 +99,13 @@ void setFrequencyRange(QAbstractAxis *axis, double minimum, double maximum)
         log->setRange(minimum, maximum);
     else if (auto *linear = qobject_cast<QValueAxis *>(axis))
         linear->setRange(minimum, maximum);
+}
+
+std::pair<double, double> phaseBounds(double phase, double uncertainty, bool unwrapped)
+{
+    const double halfWidth = uncertaintyBandSigma * uncertainty;
+    return {unwrapped ? phase - halfWidth : std::max(-180.0, phase - halfWidth),
+            unwrapped ? phase + halfWidth : std::min(180.0, phase + halfWidth)};
 }
 
 QLabel *plainLabel(QWidget *parent, const QString &name, const QString &text = {})
@@ -252,6 +263,11 @@ FrequencyAnalysisWindow::FrequencyAnalysisWindow(QWidget *parent) : QWidget(pare
     auto *acquisition = m_settingsTabs->getLayout(1);
     auto *connection = m_settingsTabs->getLayout(2);
     auto *viewSettings = m_settingsTabs->getLayout(3);
+    for (auto *tab : {sweep, acquisition, connection, viewSettings}) {
+        auto margins = tab->contentsMargins();
+        margins.setTop(5);
+        tab->setContentsMargins(margins);
+    }
     sweep->parentWidget()->setObjectName(QStringLiteral("sweepSettings"));
     acquisition->parentWidget()->setObjectName(QStringLiteral("acquisitionSettings"));
     connection->parentWidget()->setObjectName(QStringLiteral("connectionSettings"));
@@ -427,6 +443,19 @@ FrequencyAnalysisWindow::FrequencyAnalysisWindow(QWidget *parent) : QWidget(pare
     m_combinedPlot->setChecked(false, 0);
     m_combinedPlot->setToolTip(tr("Solid gain uses the left dB axis; dashed phase uses the right degree axis."));
     viewSettings->addWidget(m_combinedPlot);
+    m_showUncertainty = new WidgetButtons(m_settingsTabs, 1, ButtonTypes::CHECKABLE);
+    m_showUncertainty->setObjectName(QStringLiteral("showUncertainty"));
+    m_showUncertainty->setText(tr("Uncertainty band (\u00b1%1\u03c3)").arg(uncertaintyBandSigma));
+    m_showUncertainty->setChecked(false, 0);
+    m_showUncertainty->setToolTip(tr(
+        "Approximate +/-%1 sigma random uncertainty (about 99.7% coverage for Gaussian errors), "
+        "from coherence and the actual number of independent averages. "
+        "Requires at least two averages and positive coherence. Not a calibration or absolute accuracy bound; "
+        "the approximation is less reliable for low coherence or few averages. "
+        "Unavailable estimates and reasons are included in CSV export. "
+        "Bands need adjacent valid points; wrapped phase is clipped to +/-180 degrees and split at wrap jumps.")
+        .arg(uncertaintyBandSigma));
+    viewSettings->addWidget(m_showUncertainty);
     viewSettings->addStretch();
     m_cursorAReadout = plainLabel(plots, QStringLiteral("frequencyCursorAReadout"));
     m_cursorBReadout = plainLabel(plots, QStringLiteral("frequencyCursorBReadout"));
@@ -437,14 +466,15 @@ FrequencyAnalysisWindow::FrequencyAnalysisWindow(QWidget *parent) : QWidget(pare
     plotLayout->addWidget(m_cursorBReadout);
     plotLayout->addWidget(m_cursorDifference);
     resultTabs->addTab(plots, tr("Bode plots"));
-    m_table = new QTableWidget(0, 15, resultTabs);
+    m_table = new QTableWidget(0, 16, resultTabs);
     m_table->setObjectName(QStringLiteral("frequencyAnalysisResults"));
     m_table->setHorizontalHeaderLabels({
         tr("Requested f (Hz)"), tr("Actual f (Hz)"), tr("Drive (Vpp)"),
         tr("Actual Fs (Hz)"), tr("N"), tr("Gain (dB)"),
         tr("Wrapped phase (\u00b0)"), tr("Unwrapped phase (\u00b0)"),
         tr("CH1 RMS (V)"), tr("CH2 RMS (V)"), tr("Coherence"),
-        tr("Reference pin"), tr("Response pin"), tr("DAC pin"), tr("Observed cycles")});
+        tr("Reference pin"), tr("Response pin"), tr("DAC pin"), tr("Observed cycles"),
+        tr("Averages")});
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setAlternatingRowColors(true);
@@ -471,6 +501,7 @@ FrequencyAnalysisWindow::FrequencyAnalysisWindow(QWidget *parent) : QWidget(pare
     connect(m_unwrapPhase, &WidgetButtons::clicked, this, &FrequencyAnalysisWindow::updatePhasePlot);
     connect(m_showCursors, &WidgetButtons::clicked, this, &FrequencyAnalysisWindow::updateCursors);
     connect(m_combinedPlot, &WidgetButtons::clicked, this, &FrequencyAnalysisWindow::updatePlotLayout);
+    connect(m_showUncertainty, &WidgetButtons::clicked, this, &FrequencyAnalysisWindow::updatePlotRanges);
     connect(m_referenceSelection, &WidgetSelection::selectedIndexChanged, this,
             [this](int index) { acceptInputSelection(0, index); });
     connect(m_responseSelection, &WidgetSelection::selectedIndexChanged, this,
@@ -537,7 +568,8 @@ QJsonObject FrequencyAnalysisWindow::settingsJson() const
         {QStringLiteral("responseInput"), current.responseInput},
         {QStringLiteral("unwrapPhase"), m_unwrapPhase->isChecked(0)},
         {QStringLiteral("showCursors"), m_showCursors->isChecked(0)},
-        {QStringLiteral("combinedPlot"), m_combinedPlot->isChecked(0)}
+        {QStringLiteral("combinedPlot"), m_combinedPlot->isChecked(0)},
+        {QStringLiteral("showUncertainty"), m_showUncertainty->isChecked(0)}
     };
 }
 
@@ -630,7 +662,8 @@ bool FrequencyAnalysisWindow::restore(const QByteArray &data, QString &error)
         if (!object.value(key).isBool())
             return reject(tr("Invalid or missing '%1': expected a boolean.").arg(key));
     }
-    for (const auto &key : {QStringLiteral("showCursors"), QStringLiteral("combinedPlot")}) {
+    for (const auto &key : {QStringLiteral("showCursors"), QStringLiteral("combinedPlot"),
+                            QStringLiteral("showUncertainty")}) {
         if (object.contains(key) && !object.value(key).isBool())
             return reject(tr("Invalid '%1': expected a boolean.").arg(key));
     }
@@ -675,6 +708,7 @@ bool FrequencyAnalysisWindow::restore(const QByteArray &data, QString &error)
     m_unwrapPhase->setChecked(object.value(QStringLiteral("unwrapPhase")).toBool(), 0);
     m_showCursors->setChecked(object.value(QStringLiteral("showCursors")).toBool(true), 0);
     m_combinedPlot->setChecked(object.value(QStringLiteral("combinedPlot")).toBool(false), 0);
+    m_showUncertainty->setChecked(object.value(QStringLiteral("showUncertainty")).toBool(false), 0);
     updatePlotLayout();
     const bool inputsChanged = m_referenceInput != candidate.referenceInput || m_responseInput != candidate.responseInput;
     m_referenceInput = candidate.referenceInput;
@@ -993,6 +1027,7 @@ void FrequencyAnalysisWindow::createFrequencyAxes()
 
 void FrequencyAnalysisWindow::clearResults()
 {
+    clearUncertaintyBands();
     m_gainView->setCursors(false, 0, 0);
     m_phaseView->setCursors(false, 0, 0);
     m_results.clear();
@@ -1028,7 +1063,7 @@ void FrequencyAnalysisWindow::appendResult(double requestedFrequency, double act
     }
     if (requestedFrequency <= 0 || actualFrequency <= 0 || programmedAmplitude <= 0
         || actualRate <= 0 || samples <= 0 || result.referenceRms < 0
-        || result.responseRms < 0 || result.coherence < 0 || result.coherence > 1) {
+        || result.responseRms < 0 || result.coherence < 0 || result.coherence > 1 || result.averages < 0) {
         setStatus(tr("Rejected an out-of-range frequency analysis result."), true);
         return;
     }
@@ -1045,8 +1080,14 @@ void FrequencyAnalysisWindow::appendResult(double requestedFrequency, double act
     const QString responsePin = m_runPinsCaptured ? m_runResponsePin
         : (m_inputsReady ? resolvedPin(1, m_responseInput) : QString());
     const QString dacPin = m_runPinsCaptured ? m_runDacPin : (m_inputsReady ? m_dacPin : QString());
+    FrequencyAnalysis::Uncertainty estimate;
+    QString uncertaintyReason;
+    const std::optional<FrequencyAnalysis::Uncertainty> uncertainty =
+        FrequencyAnalysis::estimateUncertainty(wrapped, estimate, uncertaintyReason)
+            ? std::optional<FrequencyAnalysis::Uncertainty>(estimate) : std::nullopt;
     m_results.append({requestedFrequency, actualFrequency, programmedAmplitude,
-                      actualRate, samples, wrapped, unwrapped, referencePin, responsePin, dacPin});
+                      actualRate, samples, wrapped, unwrapped, referencePin, responsePin, dacPin,
+                      uncertainty, uncertaintyReason});
     m_gainSeries->append(actualFrequency, wrapped.gainDb);
     m_phaseSeries->append(actualFrequency, m_unwrapPhase->isChecked(0) ? unwrapped : wrapped.phaseDegrees);
     if (m_cursorFrequency[0] <= 0)
@@ -1061,7 +1102,8 @@ void FrequencyAnalysisWindow::appendResult(double requestedFrequency, double act
         number(wrapped.phaseDegrees), number(unwrapped), number(wrapped.referenceRms),
         number(wrapped.responseRms), number(wrapped.coherence),
         referencePin, responsePin, dacPin,
-        number(samples * std::abs(std::remainder(actualFrequency, double(actualRate))) / actualRate)};
+        number(samples * std::abs(std::remainder(actualFrequency, double(actualRate))) / actualRate),
+        QString::number(wrapped.averages)};
     for (int column = 0; column < values.size(); ++column) {
         auto *item = new QTableWidgetItem(values.at(column));
         item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -1083,6 +1125,7 @@ void FrequencyAnalysisWindow::updatePhasePlot()
 
 void FrequencyAnalysisWindow::updatePlotLayout()
 {
+    clearUncertaintyBands();
     const bool combined = m_combinedPlot->isChecked(0);
     QChart *destination = combined ? m_gainChart : m_phaseChart;
     QChart *source = m_phaseSeries->chart();
@@ -1105,6 +1148,84 @@ void FrequencyAnalysisWindow::updatePlotLayout()
     updatePlotRanges();
 }
 
+void FrequencyAnalysisWindow::clearUncertaintyBands()
+{
+    for (auto *bands : {&m_gainBands, &m_phaseBands}) {
+        for (auto *band : std::as_const(*bands)) {
+            band->chart()->removeSeries(band);
+            delete band;
+        }
+        bands->clear();
+    }
+}
+
+void FrequencyAnalysisWindow::updateUncertaintyBands()
+{
+    clearUncertaintyBands();
+    if (!m_showUncertainty->isChecked(0))
+        return;
+    const bool unwrapped = m_unwrapPhase->isChecked(0);
+    const auto addBand = [&](QLineSeries *trace, QValueAxis *axis, QAbstractAxis *frequencyAxis,
+                             QList<QAreaSeries *> &bands, const char *name,
+                             const QList<QPointF> &lower, const QList<QPointF> &upper) {
+        if (lower.size() < 2)
+            return;
+        auto *lowerSeries = new QLineSeries;
+        auto *upperSeries = new QLineSeries;
+        lowerSeries->replace(lower);
+        upperSeries->replace(upper);
+        auto *band = new QAreaSeries(upperSeries, lowerSeries);
+        band->setObjectName(QString::fromLatin1(name));
+        QColor color(Graphics::getChannelColor(0));
+        color.setAlpha(45);
+        band->setBrush(color);
+        band->setPen(QPen(Qt::NoPen));
+        auto *chart = trace->chart();
+        chart->addSeries(band);
+        band->attachAxis(axis);
+        band->attachAxis(frequencyAxis);
+        for (auto *marker : chart->legend()->markers(band))
+            marker->setVisible(false);
+        bands.append(band);
+    };
+    QList<QPointF> gainLower, gainUpper, phaseLower, phaseUpper;
+    const auto flushGain = [&] {
+        addBand(m_gainSeries, m_gainAxis, m_gainFrequencyAxis, m_gainBands,
+                "frequencyGainUncertainty", gainLower, gainUpper);
+        gainLower.clear();
+        gainUpper.clear();
+    };
+    const auto flushPhase = [&] {
+        addBand(m_phaseSeries, m_phaseAxis,
+                m_combinedPlot->isChecked(0) ? m_gainFrequencyAxis : m_phaseFrequencyAxis,
+                m_phaseBands, "frequencyPhaseUncertainty", phaseLower, phaseUpper);
+        phaseLower.clear();
+        phaseUpper.clear();
+    };
+    double previousPhase = 0;
+    for (const auto &measurement : m_results) {
+        if (!measurement.uncertainty) {
+            flushGain();
+            flushPhase();
+            continue;
+        }
+        const double frequency = measurement.actualFrequency;
+        const auto &error = *measurement.uncertainty;
+        const double gainHalfWidth = uncertaintyBandSigma * error.gainDb;
+        gainLower.append({frequency, measurement.result.gainDb - gainHalfWidth});
+        gainUpper.append({frequency, measurement.result.gainDb + gainHalfWidth});
+        const double phase = unwrapped ? measurement.unwrappedPhase : measurement.result.phaseDegrees;
+        if (!unwrapped && !phaseLower.isEmpty() && std::abs(phase - previousPhase) > 180)
+            flushPhase();
+        const auto bounds = phaseBounds(phase, error.phaseDegrees, unwrapped);
+        phaseLower.append({frequency, bounds.first});
+        phaseUpper.append({frequency, bounds.second});
+        previousPhase = phase;
+    }
+    flushGain();
+    flushPhase();
+}
+
 void FrequencyAnalysisWindow::updatePlotRanges()
 {
     double minimum = std::min(m_startFrequency->getRealValue(), m_stopFrequency->getRealValue());
@@ -1124,6 +1245,15 @@ void FrequencyAnalysisWindow::updatePlotRanges()
                 ? measurement.unwrappedPhase : measurement.result.phaseDegrees;
             phaseMinimum = std::min(phaseMinimum, phase);
             phaseMaximum = std::max(phaseMaximum, phase);
+            if (m_showUncertainty->isChecked(0) && measurement.uncertainty) {
+                const auto &error = *measurement.uncertainty;
+                const double gainHalfWidth = uncertaintyBandSigma * error.gainDb;
+                gainMinimum = std::min(gainMinimum, measurement.result.gainDb - gainHalfWidth);
+                gainMaximum = std::max(gainMaximum, measurement.result.gainDb + gainHalfWidth);
+                const auto bounds = phaseBounds(phase, error.phaseDegrees, m_unwrapPhase->isChecked(0));
+                phaseMinimum = std::min(phaseMinimum, bounds.first);
+                phaseMaximum = std::max(phaseMaximum, bounds.second);
+            }
         }
     }
     if (m_logFrequency) {
@@ -1148,6 +1278,7 @@ void FrequencyAnalysisWindow::updatePlotRanges()
     }
     m_phaseAxis->setTitleText(m_unwrapPhase->isChecked(0)
         ? tr("Unwrapped phase (\u00b0)") : tr("Wrapped phase (\u00b0)"));
+    updateUncertaintyBands();
     updateCursors();
 }
 
@@ -1207,12 +1338,13 @@ void FrequencyAnalysisWindow::updateCursors()
     const auto &b = *readingB;
     m_gainView->setCursors(enabled, a.frequency, b.frequency);
     m_phaseView->setCursors(enabled, a.frequency, b.frequency);
-    m_cursorAReadout->setText(tr("A: %1 Hz | %2 dB | %3\u00b0")
-        .arg(concise(a.frequency), concise(a.gain), concise(a.phase)));
-    m_cursorBReadout->setText(tr("B: %1 Hz | %2 dB | %3\u00b0")
-        .arg(concise(b.frequency), concise(b.gain), concise(b.phase)));
-    m_cursorDifference->setText(tr("B \u2212 A: %1 Hz | %2 dB | %3\u00b0")
-        .arg(concise(b.frequency - a.frequency), concise(b.gain - a.gain), concise(b.phase - a.phase)));
+    m_cursorAReadout->setText(tr("A: %1 | %2 dB | %3\u00b0")
+        .arg(LabelFormator::formatOutout(a.frequency, QStringLiteral("Hz"), 3), concise(a.gain), concise(a.phase)));
+    m_cursorBReadout->setText(tr("B: %1 | %2 dB | %3\u00b0")
+        .arg(LabelFormator::formatOutout(b.frequency, QStringLiteral("Hz"), 3), concise(b.gain), concise(b.phase)));
+    m_cursorDifference->setText(tr("B \u2212 A: %1 | %2 dB | %3\u00b0")
+        .arg(LabelFormator::formatOutout(b.frequency - a.frequency, QStringLiteral("Hz"), 3),
+             concise(b.gain - a.gain), concise(b.phase - a.phase)));
 }
 
 QJsonObject FrequencyAnalysisWindow::cursorsJson() const
@@ -1252,6 +1384,19 @@ QJsonObject FrequencyAnalysisWindow::state() const
 {
     QJsonArray results;
     for (const auto &measurement : m_results) {
+        QJsonObject uncertainty{
+            {QStringLiteral("available"), measurement.uncertainty.has_value()},
+            {QStringLiteral("standard_deviations"), uncertaintyBandSigma}
+        };
+        if (measurement.uncertainty) {
+            uncertainty.insert(QStringLiteral("relative_magnitude_stddev"), measurement.uncertainty->relativeMagnitude);
+            uncertainty.insert(QStringLiteral("gain_stddev_db"), measurement.uncertainty->gainDb);
+            uncertainty.insert(QStringLiteral("phase_stddev_degrees"), measurement.uncertainty->phaseDegrees);
+            uncertainty.insert(QStringLiteral("gain_half_width_db"), uncertaintyBandSigma * measurement.uncertainty->gainDb);
+            uncertainty.insert(QStringLiteral("phase_half_width_degrees"), uncertaintyBandSigma * measurement.uncertainty->phaseDegrees);
+        } else {
+            uncertainty.insert(QStringLiteral("reason"), measurement.uncertaintyReason);
+        }
         results.append(QJsonObject{
             {QStringLiteral("requested_frequency_hz"), measurement.requestedFrequency},
             {QStringLiteral("actual_frequency_hz"), measurement.actualFrequency},
@@ -1264,6 +1409,8 @@ QJsonObject FrequencyAnalysisWindow::state() const
             {QStringLiteral("reference_rms"), measurement.result.referenceRms},
             {QStringLiteral("response_rms"), measurement.result.responseRms},
             {QStringLiteral("coherence"), measurement.result.coherence},
+            {QStringLiteral("averages"), measurement.result.averages},
+            {QStringLiteral("uncertainty"), uncertainty},
             {QStringLiteral("reference_pin"), measurement.referencePin},
             {QStringLiteral("response_pin"), measurement.responsePin},
             {QStringLiteral("dac_pin"), measurement.dacPin},
@@ -1291,20 +1438,12 @@ QJsonObject FrequencyAnalysisWindow::state() const
     };
 }
 
-void FrequencyAnalysisWindow::exportCsv()
+QByteArray FrequencyAnalysisWindow::csvData() const
 {
-    if (m_results.isEmpty())
-        return;
-    QString path = QFileDialog::getSaveFileName(this, tr("Export frequency analysis"),
-                                               QStringLiteral("frequency-analysis.csv"),
-                                               tr("CSV files (*.csv)"));
-    if (path.isEmpty())
-        return;
-    if (QFileInfo(path).suffix().isEmpty())
-        path += QStringLiteral(".csv");
     QByteArray csv("requested_frequency_hz,actual_frequency_hz,drive_vpp,actual_sample_rate_hz,"
                    "samples,gain_db,phase_wrapped_deg,phase_unwrapped_deg,reference_rms_v,"
-                   "response_rms_v,coherence,reference_pin,response_pin,dac_pin,observed_cycles\n");
+                   "response_rms_v,coherence,reference_pin,response_pin,dac_pin,observed_cycles,"
+                   "averages,gain_stddev_db,phase_stddev_deg,uncertainty_status\n");
     for (const auto &measurement : m_results) {
         csv += QStringList{
             number(measurement.requestedFrequency), number(measurement.actualFrequency),
@@ -1316,10 +1455,30 @@ void FrequencyAnalysisWindow::exportCsv()
             csvField(measurement.responsePin), csvField(measurement.dacPin),
             number(measurement.samples * std::abs(std::remainder(measurement.actualFrequency,
                                                                  double(measurement.actualRate)))
-                   / measurement.actualRate)
+                   / measurement.actualRate),
+            QString::number(measurement.result.averages),
+            measurement.uncertainty ? number(measurement.uncertainty->gainDb) : QString(),
+            measurement.uncertainty ? number(measurement.uncertainty->phaseDegrees) : QString(),
+            csvField(measurement.uncertainty ? QStringLiteral("approximate_random_1_sigma")
+                                             : measurement.uncertaintyReason)
         }.join(QLatin1Char(',')).toUtf8();
         csv += '\n';
     }
+    return csv;
+}
+
+void FrequencyAnalysisWindow::exportCsv()
+{
+    if (m_results.isEmpty())
+        return;
+    QString path = QFileDialog::getSaveFileName(this, tr("Export frequency analysis"),
+                                               QStringLiteral("frequency-analysis.csv"),
+                                               tr("CSV files (*.csv)"));
+    if (path.isEmpty())
+        return;
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QStringLiteral(".csv");
+    const QByteArray csv = csvData();
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         QMessageBox::critical(this, tr("CSV export failed"),

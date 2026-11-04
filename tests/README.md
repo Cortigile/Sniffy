@@ -57,17 +57,25 @@ ctest --test-dir build-tests --output-on-failure -R frequencyanalysis
 
 The numerical tests use synthetic signals, including off-bin tones, DC offsets,
 positive and negative aliases, skew correction, and cross-spectrum averaging.
+Coherence-derived one-sigma standard errors are checked analytically, against
+seeded independent-noise scatter, and for unavailable or extreme inputs; the
+actual averaging count is checked across captures and averager resets.
 Planner tests cover automatic record geometry, safe captures below the planning
 period target, memory/rate limits, and transport/observed-overhead timing estimates.
 The offscreen module tests exercise the upload/readback/acquisition sequence,
 cancellation, malformed or clipped captures, versioned configuration persistence,
 firmware-backed pin choices and conflicts, standard widget controls, linked plot
 cursors with linear/log-frequency interpolation in separate and combined dual-axis
-plots, the View tab's display controls during idle and running sweeps, session persistence,
+plots, SI frequency units with exactly three decimal places for A/B and zero/negative
+differences, the View tab's display controls during idle and running sweeps, session persistence,
 CH1 trace/cursor colors, minor grids, manual multi-digit editing, zero-decimal
 integer controls matching the counter's sample-count dials, board-backed voltage limits, the 512-period and 10-second limits,
 ms/s settling units and session compatibility, aliasing enabled by default, stable
 timing labels during learned-overhead updates, and capability gating without a connected board.
+Uncertainty tests cover the View toggle and its session compatibility, CH1 shaded
+three-sigma bands on linear/logarithmic and separate/combined plots, axis ranges and legends,
+phase wrapping, unavailable-estimate gaps, measured averaging-count provenance,
+the compact Data table, CSV standard errors and agent-state three-sigma half-widths.
 The shared ADC input catalog is checked through both its parser and the voltmeter
 consumer, including one to four acquisition slots, shared-ADC/default-pin mappings,
 internal inputs, optional framing and transactional rejection of malformed responses.
