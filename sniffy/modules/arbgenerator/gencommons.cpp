@@ -1,4 +1,6 @@
 #include "gencommons.h"
+#include <algorithm>
+#include <cstring>
 
 GenCommons::GenCommons(QByteArray prefix,Comms *comm, int maxSamplingRate, QObject *parent) : QObject(parent)
 {
@@ -60,11 +62,11 @@ void GenCommons::setNumChannels(int numChannels)
 
 void GenCommons::setSamplingFrequency(int channel, qreal freq)
 {
-    int tmp = (int)(round(freq))*256 + (channel+1)%256;
-
-    if(round(freq) > maxSmplFreq){
-        tmp = maxSmplFreq*256 + (channel+1)%256;
-    }
+    const quint32 rate = quint32(std::min(round(freq), double(maxSmplFreq)));
+    const quint32 packed = rate * 256U + quint32((channel + 1) % 256);
+    // The 24-bit rate can legitimately set the signed transport parameter's top bit.
+    qint32 tmp;
+    std::memcpy(&tmp, &packed, sizeof(tmp));
     comm->write(prefix,cmd->SAMPLING_FREQ,tmp);
 }
 

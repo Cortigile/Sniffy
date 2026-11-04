@@ -566,6 +566,11 @@ In the Advanced section, you can configure:
 
 The **Adv** tab retains the latest **128 complete raw acquisitions** in desktop memory.
 Use **Previous**, **Next**, or the history slider (oldest on the left) to inspect a capture.
+The **<** and **>** buttons to the right of the top signal-position slider provide the same
+Previous/Next navigation without opening **Adv**. They are disabled at the ends of the history.
+The label immediately before these buttons shows the displayed capture number / total stored
+captures (for example, **3/12**, or **0/0** before the first capture). It adds **(stopped)**
+whenever acquisition is stopped, including history browsing and completion of a single capture.
 Browsing pauses acquisition and displays the selected raw waveform, including its original
 sampling rate and time base. Measurements, math, cursors, and FFT operate on the displayed
 capture. **Live** returns to the newest capture and resumes the current trigger mode.
@@ -1070,6 +1075,65 @@ The Voltage source is used to set analog DC levels on available channels.
 - the output is directly dependent on the physical load of the output.
 
 ![Voltage source with multiple channels and voltage level controls](assets/images/voltage_source_view.png){.manual-scale--80}
+
+### 16.1 Frequency analysis
+
+Frequency analysis sweeps a sine-wave drive and measures the DUT transfer function **H = output / input** using two oscilloscope inputs. It is a host-side combination of the oscilloscope and arbitrary DAC generator, not a separate firmware instrument. Availability and feasible settings depend on board capabilities, firmware and demo restrictions: a DAC output and at least two ADC inputs are required. The oscilloscope and DAC resources remain reserved while the module is open, including between sweeps.
+
+#### Wiring
+
+- Connect **DAC CH1** to the DUT input and **scope CH1** to that same input as the reference.
+- Connect the DUT output to **scope CH2** as the response, and connect a **common ground**.
+- In **Connection**, select the external ADC pin for **Reference CH1** and **Response CH2** from the lists reported by the board. **Default** uses the firmware's default pin for that channel.
+- Amplitude is **Vpp (peak-to-peak)**, not RMS. The sine output spans **offset − Vpp/2** to **offset + Vpp/2**. Keep this entire span within DAC limits, and keep both measured signals within ADC limits. Account for DUT gain, bias, loading and possible clipping.
+
+#### Sweep settings and operation
+
+1. Set the start/stop frequency (positive and strictly increasing), start/stop amplitude in Vpp and points per decade.
+2. In **Acquisition**, independently select **Linear** or **Logarithmic** frequency spacing and amplitude spacing. Both frequency distributions use **ceil(log10(stop frequency / start frequency) × points per decade)** intervals, with both endpoints included. Frequency spacing changes how those points are distributed, not that interval count.
+3. Amplitude endpoints are interpolated over normalized point index **t = i / number of intervals**: **A(t) = Astart + t(Astop − Astart)** for Linear, or **A(t) = Astart × (Astop/Astart)^t** for Logarithmic. Vpp endpoints must be positive.
+4. Configure the DC offset, averages, the observed-period target (**16–512**) and settling time (**0–10 s**, with millisecond resolution). Amplitude and offset dials are limited to the board's reported DAC voltage range (normally **0–VCC** for offset and up to **VCC Vpp** for amplitude); the entire offset ± Vpp/2 span must still fit that range. Sampling rate and record length are chosen automatically; there is no samples-per-period control. In alias mode, a period means the observed alias period. Frequency, amplitude, offset and settling dials display three decimal places in the selected unit and preserve text while it is being typed. Points, averages and periods use the same zero-decimal dial setup and adaptive +/- buttons as the counter's sample-count control. Settling time uses seconds with the normal **ms/s** unit prefixes, never “kms”.
+5. Use the prominent start, stop/cancel and export controls below the settings tabs in the same control pane. The module checks generator/capture settings and selected-pin conflicts before starting; the UI frequency range is not a statement of supported board bandwidth. Stopping retains partial results.
+
+Each point uses the arbitrary generator's **Best fit** period-length/divider search and uploads a new sine period. At least **four DAC samples per period** are required, so the digital generation ceiling is the reported DAC sampling limit divided by four; analog fidelity can impose a lower useful limit. Sampling and settling use the actual generator-frequency readback. Defaults are **32 observed periods and four cross-spectral averages**. Automatic planning targets about 32 samples per observed cycle and chooses a power-of-two record within board rate/memory limits. Captures longer than 30 minutes are rejected.
+
+The period setting is a planning target, not a strict readback requirement. A record with fewer requested periods is still used if its actual rate and length safely resolve the tone and contain at least **16 observed cycles**. The **Data** tab/CSV report the actual cycle count, and the completed sweep reports when this target was limited. If a record does not meet the Fourier minimum, the controller enlarges it when memory permits or adjusts the sampling request using the actual ADC rate, with bounded retries. It never substitutes an invalid gain/phase result.
+
+The **lowest-frequency point** and **total sweep** estimates now budget the **F_A_ fast-auto trigger timeout**, averaging and settling (at least three physical signal periods), rather than showing the optimistic acquisition time as the main estimate. They include waveform upload and capture transfer at the reported UART rate, when applicable. USB latency, upload-block acknowledgements, processing and device round-trip overhead are learned from completed points and refine the estimate during the sweep; the generator geometry is cached so these updates do not repeatedly perform the best-fit search. Before such observations, unknown USB/device overhead is explicitly indicated. These estimates are not timing guarantees. An ideal default 10 Hz point uses Fs = 320 Hz and N = 1024; its fast-auto acquisition/settling budget is about **25.9 s before transfer/device overhead**.
+
+After **Cancel**, wait for the pending instrument readbacks to drain and for the status to confirm cancellation before starting another sweep. A successfully completed cancellation allows restarting without reconnecting. **Closing the module during a sweep or an instrument timeout requires reconnecting the board before another run**: the protocol replies have no transaction tags, so reconnecting is required to safely separate late replies from a new sweep. Reopening the window or loading a session does not remove this requirement.
+
+Loading a session restores settings but **never automatically starts a sweep**. Older samples-per-period settings are ignored; settings outside the current voltage, period or settling limits are rejected with an error, not silently clamped during loading. Saved settling values remain in milliseconds for compatibility. The combined-plot preference is saved; sessions without it retain separate plots. **Unwrap phase** removes artificial ±180° jumps by choosing the nearest 360° branch: for example, +170° followed by −170° is displayed as +190°, a continuous +20° change. This changes the display branch, not the measured phase; CSV retains both wrapped and unwrapped values. Widely separated points or steep phase changes can make the branch choice ambiguous.
+
+#### Reading and exporting results
+
+The **View** tab next to **Connection** contains **Unwrap phase**, **Cursors A/B**, **Gain + phase in one plot** and **Uncertainty band (±3σ)**. These display controls remain available during a sweep while sweep, acquisition and connection settings stay locked. Cursor readouts remain below the plots.
+
+The stacked Bode plots show gain in dB and relative phase in degrees against the **actual positive generator frequency**, which can differ from the requested value because of clock/divider quantization. Enable **Gain + phase in one plot** to overlay them with a shared X axis, gain on the **left dB axis** and phase on the **right degree axis**. Gain is solid and phase is dashed in this view. Both traces and all cursor lines, labels and readouts use the **CH1 color**. Switching views preserves measurements, phase unwrapping and cursor positions. The X axis follows the selected frequency distribution (linear or logarithmic) when a sweep is cleared or started.
+
+Enable **Uncertainty band (±3σ)** to shade three times the approximate random standard error around both traces in the CH1 color. It works in separate and combined plots and is **off by default**; the preference is saved, and older sessions without it load with bands off. Details are available in the button's tooltip, without an extra label below it. The estimate uses each point's measured magnitude-squared coherence **C** and actual number of averaged captures **M**, not a subsequently changed averaging setting:
+
+- Relative magnitude standard error: **r = sqrt((1 − C) / (2 × M × C))**.
+- Gain standard error: **σgain ≈ (20 / ln(10)) × r dB**.
+- Phase standard error: **σphase ≈ (180 / π) × r degrees**.
+
+The formulas give **one standard deviation**; the displayed bounds are **gain ± 3 × σgain** and **phase ± 3 × σphase**, corresponding to about **99.7% coverage for Gaussian errors**. This is not a guaranteed accuracy bound. The H1 approximation assumes a stationary linear response and independent captures; low coherence or few averages make it less reliable. It excludes calibration, channel skew, loading, harmonic aliasing and other systematic errors. Coherence equal to one gives zero estimated random scatter, not a guarantee of absolute accuracy.
+
+At least **two averages** and **C > 0** are required. Unknown averaging counts, a single average or zero coherence produce an explicit unavailable status rather than a misleading zero-width band. Shading joins adjacent points with available estimates and leaves gaps elsewhere; an isolated point has no shaded area. Phase shading follows **Unwrap phase**; in wrapped mode it is clipped to ±180° and split at wrap jumps.
+
+Minor grids help read intermediate values. The linked **A/B frequency cursors** move continuously on either plot. A, B and their frequency difference use the appropriate SI unit (for example Hz, kHz or MHz) with **three decimal places**, including zero and negative differences. Between measured points they interpolate gain in dB and the displayed phase linearly in the selected frequency-axis space (log-frequency for a logarithmic axis, frequency for a linear axis). Cursor values are interpolated estimates, not additional measurements; exported sweep data remain the measured points.
+
+The **Data** tab and **Export CSV** include requested and actual frequency, programmed drive Vpp, actual sampling rate Fs, record length N, gain, wrapped and unwrapped phase, CH1/CH2 tone RMS, coherence and the actual average count. The Data table omits uncertainty columns; CSV additionally includes gain/phase **one-sigma standard errors** and uncertainty status, even with shading disabled. CSV columns are `averages`, `gain_stddev_db`, `phase_stddev_deg` and `uncertainty_status`; unavailable errors have empty numeric fields and an explanatory status. Agent state includes the actual `averages` and an `uncertainty` object with availability, `standard_deviations: 3`, the one-sigma estimates and three-sigma half-widths (`gain_half_width_db`, `phase_half_width_degrees`), or an unavailable reason. Agent-state and CSV frequencies remain in Hz without display rounding. Coherence is a consistency indicator across averages, not an accuracy certificate; in particular, one average cannot establish measurement reliability.
+
+Analysis uses a **targeted flat-top-windowed Fourier spectral sample at the actual generator frequency**, not the highest FFT peak. Cross spectra and reference/response powers are averaged before calculating the transfer estimate. An unrelated larger peak is therefore not silently treated as the stimulus, but interference, clipping or insufficient reference signal can still invalidate a measurement.
+
+#### Undersampling and relative phase
+
+**Allow undersampling (alias mode)** is **on by default** for new sessions. Use it only for a **stationary, band-limited sinusoid**; disable it when those assumptions do not hold. Saved sessions retain their explicit on/off choice. The analysis handles the alias's signed frequency and corrects the associated phase orientation. Undersampling **does not extend the analog bandwidth or eliminate DAC harmonics**: harmonics, noise and other signals can fold onto the target tone.
+
+The module validates the **actual sampling-rate readback**, not just the requested rate. In alias mode it can make **up to eight detuned retry attempts** to find a usable capture rate. If the readback still fails the sampling requirements, the measurement stops with an explicit error instead of accepting an invalid result. These retries do not guarantee that any particular physical frequency can be measured.
+
+There is no manual skew control. Phase is the measured CH2/CH1 relative phase; channel timing and analog frontend differences are not automatically calibrated. Legacy session skew values are ignored when loading the new control layout. These plots do not imply calibrated amplitude/phase accuracy, a specified usable analog bandwidth or hardware validation.
 
 ## 17. Module and pin conflicts
 

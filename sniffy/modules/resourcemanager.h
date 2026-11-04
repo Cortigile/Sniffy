@@ -3,6 +3,8 @@
 
 #include <QtGlobal>
 #include <QJsonObject>
+#include <QJsonArray>
+#include <QSet>
 #include "abstractmodule.h"
 
 struct ResourceSet {
@@ -11,6 +13,7 @@ struct ResourceSet {
     quint32 gpioB = 0;
     quint32 gpioC = 0;
     quint32 gpioD = 0;
+    QSet<QString> pins;
 
     // Returns true if any resource or GPIO mask collides between the two sets
     static bool collide(const ResourceSet &a, const ResourceSet &b) {
@@ -19,6 +22,8 @@ struct ResourceSet {
         if (a.gpioB & b.gpioB) return true;
         if (a.gpioC & b.gpioC) return true;
         if (a.gpioD & b.gpioD) return true;
+        for (const auto &pin : a.pins)
+            if (b.pins.contains(pin)) return true;
         return false;
     }
 
@@ -29,6 +34,7 @@ struct ResourceSet {
         gpioB |= r.gpioB;
         gpioC |= r.gpioC;
         gpioD |= r.gpioD;
+        pins.unite(r.pins);
        }
 
     // Subtract (bitwise AND NOT) masks from this set using r
@@ -38,6 +44,7 @@ struct ResourceSet {
         gpioB &= ~r.gpioB;
         gpioC &= ~r.gpioC;
         gpioD &= ~r.gpioD;
+        pins.subtract(r.pins);
     }
 
     // JSON serialization methods
@@ -48,6 +55,12 @@ struct ResourceSet {
         obj["gpioB"] = static_cast<qint64>(gpioB);
         obj["gpioC"] = static_cast<qint64>(gpioC);
         obj["gpioD"] = static_cast<qint64>(gpioD);
+        QJsonArray names;
+        QStringList sorted = pins.values();
+        sorted.sort();
+        for (const auto &pin : sorted)
+            names.append(pin);
+        obj["pins"] = names;
         return obj;
     }
     static ResourceSet fromJson(const QJsonObject &obj){
@@ -57,6 +70,11 @@ struct ResourceSet {
     s.gpioB = static_cast<quint32>(obj["gpioB"].toDouble());
     s.gpioC = static_cast<quint32>(obj["gpioC"].toDouble());
     s.gpioD = static_cast<quint32>(obj["gpioD"].toDouble());
+    for (const auto &pin : obj["pins"].toArray()) {
+        const QString name = pin.toString().trimmed().toUpper();
+        if (!name.isEmpty() && name != QLatin1String("-"))
+            s.pins.insert(name);
+    }
     return s;
 }
 
@@ -73,6 +91,11 @@ struct ResourceSet {
             s.gpioB = module->getGpioMaskB();
             s.gpioC = module->getGpioMaskC();
             s.gpioD = module->getGpioMaskD();
+            for (const auto &pin : module->getPinFunctions()) {
+                const QString name = pin.pin.trimmed().toUpper();
+                if (!name.isEmpty() && name != QLatin1String("-"))
+                    s.pins.insert(name);
+            }
         } else {
             s.resources = (resourcesOverride >= 0) ? resourcesOverride : 0;
         }

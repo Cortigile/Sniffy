@@ -14,6 +14,12 @@ The Qt, compiler-runtime, libusb, and ST-Link DLL directories must be on `PATH` 
 Windows. Tests run offscreen without a connected board and cover the 128-capture
 limit, raw-data preservation, rolling averages and eviction, sampling/geometry
 resets, complete-frame validation, history navigation, and acquisition pause/resume.
+History navigation also checks the top-slider arrow buttons, their placement and end-of-history
+enabled states, and synchronization with the Adv tab controls.
+The adjacent capture-position label is checked before the first capture, during live acquisition
+and history browsing, after explicit stop/resume, and on single-capture completion.
+The signal-position slider is checked against its 33-pixel background image to prevent
+vertical cropping and keep the groove and zoom handle within the widget.
 Frames include the firmware's trailing `S_OK` marker. The default live-acquisition
 test checks startup with averaging off, unaveraged sample values, and the next-capture
 command after each received frame.
@@ -38,6 +44,47 @@ on Windows. The tests use Qt's offscreen platform, require no connected board, a
 configuration compatibility, session and mode restoration, input-selection limits, sampling
 counts, memory-limited period options, and reference/multimode capture sequencing.
 Voltage tests inject synthetic measurements; physical ADC settling and accuracy still need board testing.
+
+## Frequency analysis
+
+Configure with the same Qt/toolchain settings as the application:
+
+```powershell
+cmake -S sniffy -B build-tests -DSNIFFY_BUILD_FREQUENCY_ANALYSIS_TESTS=ON
+cmake --build build-tests --target frequencyanalysis_engine_tests frequencyanalysis_tests
+ctest --test-dir build-tests --output-on-failure -R frequencyanalysis
+```
+
+The numerical tests use synthetic signals, including off-bin tones, DC offsets,
+positive and negative aliases, skew correction, and cross-spectrum averaging.
+Coherence-derived one-sigma standard errors are checked analytically, against
+seeded independent-noise scatter, and for unavailable or extreme inputs; the
+actual averaging count is checked across captures and averager resets.
+Planner tests cover automatic record geometry, safe captures below the planning
+period target, memory/rate limits, and transport/observed-overhead timing estimates.
+The offscreen module tests exercise the upload/readback/acquisition sequence,
+cancellation, malformed or clipped captures, versioned configuration persistence,
+firmware-backed pin choices and conflicts, standard widget controls, linked plot
+cursors with linear/log-frequency interpolation in separate and combined dual-axis
+plots, SI frequency units with exactly three decimal places for A/B and zero/negative
+differences, the View tab's display controls during idle and running sweeps, session persistence,
+CH1 trace/cursor colors, minor grids, manual multi-digit editing, zero-decimal
+integer controls matching the counter's sample-count dials, board-backed voltage limits, the 512-period and 10-second limits,
+ms/s settling units and session compatibility, aliasing enabled by default, stable
+timing labels during learned-overhead updates, and capability gating without a connected board.
+Uncertainty tests cover the View toggle and its session compatibility, CH1 shaded
+three-sigma bands on linear/logarithmic and separate/combined plots, axis ranges and legends,
+phase wrapping, unavailable-estimate gaps, measured averaging-count provenance,
+the compact Data table, CSV standard errors and agent-state three-sigma half-widths.
+The shared ADC input catalog is checked through both its parser and the voltmeter
+consumer, including one to four acquisition slots, shared-ADC/default-pin mappings,
+internal inputs, optional framing and transactional rejection of malformed responses.
+
+Run the numerical target on its own for a fast DSP-only check. The module target
+needs the same Qt, compiler-runtime, libusb, and ST-Link DLL directories on
+`PATH` as the application. Physical loopback and DUT measurements are still
+required to characterize DAC/ADC bandwidth, channel skew, settling, harmonic
+aliasing, absolute voltage calibration, and behavior on each board/firmware.
 
 ## Updater
 

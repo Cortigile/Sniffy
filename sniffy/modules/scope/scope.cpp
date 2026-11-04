@@ -101,6 +101,7 @@ void Scope::parseData(QByteArray data){
             samplingActive = false;
             scpWindow->singleSamplingDone();
             setModuleStatus(ModuleStatus::PAUSE);
+            updateHistoryControls();
         }
     }else{
         qWarning() << "[Scope][parseData] Unknown data header" << dataHeader;
@@ -160,7 +161,7 @@ QWidget* Scope::getWidget(){
 void Scope::updateHistoryControls()
 {
     scpWindow->setHistoryState(history.size(), historyIndex, browsingHistory,
-                              history.averageCount(), history.averageWindow());
+                              history.averageCount(), history.averageWindow(), samplingActive);
 }
 
 void Scope::displayCapture(int index, bool averaged)
@@ -398,6 +399,8 @@ void Scope::stopSampling(){
     samplingActive = false;
     comm->write(cmd->SCOPE+":"+cmd->STOP+";");
     setModuleStatus(ModuleStatus::PAUSE);
+    if (scpWindow)
+        updateHistoryControls();
 }
 
 void Scope::startSampling(){
@@ -407,6 +410,7 @@ void Scope::startSampling(){
         setModuleStatus(ModuleStatus::WAIT_EVENT);
     else
         setModuleStatus(ModuleStatus::PLAY);
+    updateHistoryControls();
 }
 
 // ******************* Private functions - not important and no logic inside *******
