@@ -54,13 +54,14 @@ public:
 
 private:
     void setGenerateButton (QString text, QString color);
+    void updateSweepControllers();
 
     Ui::ArbGeneratorWindow *ui;
     ArbGeneratorConfig *config;
     ArbGeneratorSpec *spec;
     ArbGenPanelSettings *setting;
     ArbGeneratorFileLoader *fileLoader; //this should be actually in module not in window (TODO in far future)
-    ArbGenSweepController *sweepController; //this should be actually in module not in window (TODO in far future)
+    ArbGenSweepController *sweepController[MAX_SWEEP_CHANNELS_NUM];
 
     widgetChart *chart;
     widgetChart *PWMchart;
@@ -75,7 +76,7 @@ private slots:
     void runGeneratorCallback();
     void createSignalCallback();
     void openFileCallback();
-    void sweepTimerCallback(qreal frequency);
+    void sweepTimerCallback(qreal frequency, int channel);
     void syncRequestCallback();
 
 signals:

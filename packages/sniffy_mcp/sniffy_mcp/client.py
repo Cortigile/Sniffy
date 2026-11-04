@@ -294,7 +294,12 @@ class SniffyClient:
         return self._call("module_halt", {"module": name})
 
     def get_module_state(self, name: str) -> dict:
-        """Read current GUI state of a running module."""
+        """Read current GUI state of a running module.
+
+        Arb/PWM generators retain top-level CH1 sweep aliases and expose
+        channels[i].sweep for i < 2: enabled, active, min_freq, max_freq,
+        sweep_time (seconds per leg), scale, mode. freq_sync_ch1 is unchanged.
+        """
         return self._call("get_module_state", {"module": name})
 
     def module_get_config(self, name: str) -> dict:
@@ -503,10 +508,18 @@ class SniffyClient:
 
     def arbgen_set_sweep(self, module: str, enable: bool,
                          min_freq: float = 0, max_freq: float = 0,
-                         sweep_time: float = 0) -> dict:
-        """Enable/disable SW sweep on CH1.  When enabling, optionally set
-        min_freq (Hz), max_freq (Hz), sweep_time (s)."""
-        params: dict = {"module": module, "enable": enable}
+                         sweep_time: float = 0, channel: int = 0,
+                         scale: str | None = None, mode: str | None = None) -> dict:
+        """Enable/disable an independent SW sweep (0=CH1, 1=CH2).
+
+        When enabling, optionally set min_freq/max_freq (0.01..1e6 Hz,
+        min <= max) and sweep_time (0.1..60 seconds per leg). A symmetric
+        cycle lasts 2 * sweep_time. Legacy zero numeric defaults are omitted.
+        Optional scale ('linear'/'exponential') and mode ('saw'/'symmetric')
+        retain their current settings when omitted. The bridge validates
+        options; disable CH2 frequency sync before editing its sweep.
+        """
+        params: dict = {"module": module, "enable": enable, "channel": channel}
         if enable:
             if min_freq > 0:
                 params["min_freq"] = min_freq
@@ -514,10 +527,18 @@ class SniffyClient:
                 params["max_freq"] = max_freq
             if sweep_time > 0:
                 params["sweep_time"] = sweep_time
+        if scale is not None:
+            params["scale"] = scale
+        if mode is not None:
+            params["mode"] = mode
         return self._call("arbgen_set_sweep", params)
 
     def arbgen_set_freq_sync(self, module: str, channel: int, enabled: bool) -> dict:
-        """Set CH1 freq sync on/off for channel (1-3 = CH2-CH4)."""
+        """Set CH1 freq sync on/off for channel (1-3 = CH2-CH4).
+        With channel=1 and enabled=True, CH2 follows CH1/master, including
+        its sweep and the existing common firmware timer updates.
+        Disable sync before editing CH2's independent sweep.
+        """
         return self._call("arbgen_set_freq_sync", {"module": module, "channel": channel, "enabled": enabled})
 
     def arbgen_set_pwm_frequency(self, module: str, channel: int, value: float) -> dict:

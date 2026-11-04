@@ -203,6 +203,10 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Read the current GUI state of a running module. "
                 "Returns mode/tab, dial values, button selections etc. "
+                "Arb/PWM generators keep top-level sweep_enabled, sweep_min_freq, "
+                "sweep_max_freq, sweep_time as CH1 aliases; channels[i].sweep "
+                "(i < 2) has enabled, active, min_freq, max_freq, sweep_time "
+                "(seconds per leg), scale, mode. freq_sync_ch1 is unchanged. "
                 "Use after module_start to check session-restored state, "
                 "or at any time to verify current settings."
             ),
@@ -801,22 +805,44 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="sniffy_arbgen_set_sweep",
-            description="Enable/disable SW frequency sweep on CH1.  When enabling, optionally set min_freq (Hz), max_freq (Hz), sweep_time (s).",
+            description=(
+                "Enable/disable an independent SW frequency sweep on CH1 or CH2 "
+                "(channel 0 or 1; default CH1). When enabling, optionally set "
+                "min_freq <= max_freq (Hz) and sweep_time (seconds per leg; "
+                "symmetric cycle = 2 * sweep_time). Optional scale and mode "
+                "retain current settings when omitted. Disable CH2 frequency "
+                "sync with arbgen_set_freq_sync before editing its sweep. "
+                "The bridge validates all options."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "module":     {"type": "string"},
                     "enable":     {"type": "boolean"},
-                    "min_freq":   {"type": "number", "description": "Min sweep frequency (Hz)."},
-                    "max_freq":   {"type": "number", "description": "Max sweep frequency (Hz)."},
-                    "sweep_time": {"type": "number", "description": "Sweep time (seconds)."},
+                    "min_freq":   {"type": "number", "minimum": 0.01, "maximum": 1e6,
+                                   "description": "Min sweep frequency (Hz), <= max_freq."},
+                    "max_freq":   {"type": "number", "minimum": 0.01, "maximum": 1e6,
+                                   "description": "Max sweep frequency (Hz), >= min_freq."},
+                    "sweep_time": {"type": "number", "minimum": 0.1, "maximum": 60,
+                                   "description": "Seconds per leg; symmetric full cycle is twice this."},
+                    "channel":    {"type": "integer", "enum": [0, 1], "default": 0,
+                                   "description": "Zero-based channel: 0=CH1, 1=CH2."},
+                    "scale":      {"type": "string", "enum": ["linear", "exponential"],
+                                   "description": "Sweep scale; omitted keeps the current setting."},
+                    "mode":       {"type": "string", "enum": ["saw", "symmetric"],
+                                   "description": "Saw resets after each leg; symmetric sweeps up then down."},
                 },
                 "required": ["module", "enable"],
             },
         ),
         Tool(
             name="sniffy_arbgen_set_freq_sync",
-            description="Set CH1 frequency sync on/off for a channel. Channel is 0-based index (1=CH2, 2=CH3, 3=CH4).",
+            description=(
+                "Set CH1 frequency sync on/off for a channel. Channel is 0-based "
+                "(1=CH2, 2=CH3, 3=CH4). With channel=1 and enabled=true, CH2 "
+                "follows CH1/master including its sweep, preserving common firmware "
+                "timer updates. Disable sync before editing CH2's independent sweep."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1161,6 +1187,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             arguments.get("min_freq", 0),
             arguments.get("max_freq", 0),
             arguments.get("sweep_time", 0),
+            channel=arguments.get("channel", 0),
+            scale=arguments.get("scale"),
+            mode=arguments.get("mode"),
         ),
         "sniffy_arbgen_set_freq_sync": lambda: c.arbgen_set_freq_sync(
             arguments["module"], arguments["channel"], arguments["enabled"],

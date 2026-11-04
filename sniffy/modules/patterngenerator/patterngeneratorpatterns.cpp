@@ -162,6 +162,9 @@ QList<patttype> *PatternGeneratorPatterns::createPatternOrJustGetData(int index,
 
 QList<patttype> *PatternGeneratorPatterns::setDataLen(int index, int len)
 {
+    if (index == 0)
+        return static_cast<UserDefined *>(pattern[index].get())->resize(len);
+
     return pattern[index]->create(len);
 }
 
@@ -170,10 +173,12 @@ QList<patttype> *PatternGeneratorPatterns::setDefault(int index)
     // Create if needed
     if (pattern[index] == nullptr)
     {
-        pattern[index] = createPatternObj[index]();
+        return createPatternOrJustGetData(index, PATT_DEFAULT_DATA_LENGTH);
     }
     switch (index)
     {
+    case 0: // User defined: clear edits without changing the active tick count
+        return pattern[index]->create(pattern[index]->getData()->size());
     case 5: // PRBS
         return static_cast<PRBS *>(pattern[index].get())->create(PATT_DEFAULT_PRBS_ORDER);
     case 6: // PWM
@@ -370,10 +375,21 @@ QList<patttype> *PatternGeneratorPatterns::setI2cRepeatedStart(bool on)
 QList<patttype> *UserDefined::create(int len)
 {
     data->clear();
+    retainedData.clear();
 
-    for (int i = 0; i < len; i++)
-        data->append((0 | CLOCK_CH8) & CLOCK_MASK(i));
+    return resize(len);
+}
 
+QList<patttype> *UserDefined::resize(int len)
+{
+    // Capture grid edits before hiding ticks; retain the hidden suffix until reset.
+    for (int i = 0; i < data->size(); i++)
+        retainedData[i] = data->at(i);
+
+    for (int i = retainedData.size(); i < len; i++)
+        retainedData.append(CLOCK_CH8 & CLOCK_MASK(i));
+
+    *data = retainedData.mid(0, len);
     return data;
 }
 
