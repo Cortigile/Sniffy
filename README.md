@@ -19,6 +19,7 @@ Jump to official project website [sniffylab.com](https://sniffylab.com) for regi
 - **Device Detection**: Automatically detects connected STM32 Nucleo boards via ST-Link.
 - **Real-time Visualization**: High-performance charting for signal analysis.
 - **Module Support**: Configurable modules for Oscilloscope, Signal Generator, PWM, and more.
+- **Frequency Analysis**: Two-input gain/phase sweeps with linear/logarithmic frequency and Vpp spacing, Bode plots, and CSV export on compatible hardware/firmware.
 - **Cross-Platform**: Available for Windows and Linux.
 - **Hardware Integration**: Full operational firmware for STM32 Nucleo boards available via commercial licensing (runs in restricted Demo mode by default).
 
@@ -141,4 +142,3 @@ This project uses the following third-party libraries:
 
 Full license texts are available in the [sniffy/third-party-licenses](sniffy/third-party-licenses/) folder.
 See [sniffy/THIRD-PARTY-NOTICES.md](sniffy/THIRD-PARTY-NOTICES.md) for complete attribution details.
-

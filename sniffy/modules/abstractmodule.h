@@ -52,7 +52,7 @@ public:
 
     void setDockWidgetWindow(ModuleDockWidget *dockWidget);
     void setModuleControlWidget(WidgetControlModule *scpWidget);
-    void setComms(Comms *communication);
+    virtual void setComms(Comms *communication);
 
     QByteArray getCommandPrefix();
     void hideModuleStatus();
@@ -81,6 +81,7 @@ public:
 
     int getResources();
     AbstractSpecification* getSpecification() const { return moduleSpecification; }
+    const QList<PinFunctionInfo> &getPinFunctions() const { return m_reportedPinFunctions; }
 
     // GPIO mask getters (delegated to specification)
     quint32 getGpioMaskA() const { return moduleSpecification ? moduleSpecification->getGpioMaskA() : 0u; }

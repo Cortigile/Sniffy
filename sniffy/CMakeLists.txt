@@ -328,6 +328,46 @@ if(SNIFFY_BUILD_PATTERNGENERATOR_TESTS)
     endif()
 endif()
 
+option(SNIFFY_BUILD_FREQUENCY_ANALYSIS_TESTS "Build frequency analysis regression tests" OFF)
+if(SNIFFY_BUILD_FREQUENCY_ANALYSIS_TESTS)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    enable_testing()
+    add_executable(frequencyanalysis_engine_tests
+        ../tests/frequencyanalysis_engine_test.cpp
+        modules/frequencyanalysis/frequencyanalysisengine.cpp
+        modules/arbgenerator/signalcreator.cpp
+    )
+    target_include_directories(frequencyanalysis_engine_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(frequencyanalysis_engine_tests PRIVATE Qt6::Core Qt6::Test)
+    set(FREQUENCY_ANALYSIS_TEST_SOURCES ${CPP_FILES})
+    list(FILTER FREQUENCY_ANALYSIS_TEST_SOURCES EXCLUDE REGEX "/main\\.cpp$")
+    add_executable(frequencyanalysis_tests
+        ../tests/frequencyanalysis_test.cpp
+        ${FREQUENCY_ANALYSIS_TEST_SOURCES} ${C_FILES} ${UI_FILES} ${HDR_FILES} ${QRC_FILES}
+    )
+    get_target_property(FREQUENCY_ANALYSIS_INCLUDES ${PROJECT_NAME} INCLUDE_DIRECTORIES)
+    get_target_property(FREQUENCY_ANALYSIS_DEFINITIONS ${PROJECT_NAME} COMPILE_DEFINITIONS)
+    get_target_property(FREQUENCY_ANALYSIS_LIBRARIES ${PROJECT_NAME} LINK_LIBRARIES)
+    target_include_directories(frequencyanalysis_tests PRIVATE ${FREQUENCY_ANALYSIS_INCLUDES})
+    target_compile_definitions(frequencyanalysis_tests PRIVATE ${FREQUENCY_ANALYSIS_DEFINITIONS})
+    target_link_libraries(frequencyanalysis_tests PRIVATE ${FREQUENCY_ANALYSIS_LIBRARIES} Qt6::Test)
+    if(SNIFFY_USE_PCH)
+        target_precompile_headers(frequencyanalysis_tests PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/cmake/pch.hpp>
+        )
+    endif()
+    if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(frequencyanalysis_tests PRIVATE -Wa,-mbig-obj)
+    endif()
+    add_test(NAME frequencyanalysis_engine_tests COMMAND frequencyanalysis_engine_tests -o -,txt)
+    add_test(NAME frequencyanalysis_tests COMMAND frequencyanalysis_tests -platform offscreen -o -,txt)
+    if(TARGET Qt6::QOffscreenIntegrationPlugin)
+        set_tests_properties(frequencyanalysis_tests PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
+        )
+    endif()
+endif()
+
 option(SNIFFY_BUILD_VOLTMETER_TESTS "Build voltmeter regression tests" OFF)
 if(SNIFFY_BUILD_VOLTMETER_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)

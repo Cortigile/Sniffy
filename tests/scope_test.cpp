@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QIODevice>
 #include <QSlider>
+#include <QStyleOptionSlider>
 #include <QGraphicsScene>
 #include "gui/widgetdialrange.h"
 #include "gui/widgetlabelarea.h"
@@ -71,6 +72,39 @@ private slots:
         QCOMPARE(history.at(0).channels[0][0].y(), 12.0);
         QCOMPARE(history.at(127).channels[0][0].y(), 139.0);
         QCOMPARE(history.liveData(), history.at(127).channels);
+    }
+
+    void signalSliderBackgroundFits()
+    {
+        ScopeConfig config;
+        ScopeWindow window(&config);
+        window.resize(900, 600);
+        window.setDataMinMaxTimeAndZoom(-0.1, 0.1, 4);
+        window.show();
+        QApplication::processEvents();
+        auto *slider = window.findChild<QSlider *>("sliderSignal");
+        QVERIFY(slider);
+        const QImage background(Graphics::getCommonPath() + "signalBackground.png");
+        QVERIFY(!background.isNull());
+        QStyleOptionSlider option;
+        option.initFrom(slider);
+        option.state |= QStyle::State_Horizontal;
+        option.orientation = Qt::Horizontal;
+        option.minimum = slider->minimum();
+        option.maximum = slider->maximum();
+        option.sliderPosition = slider->value();
+        option.sliderValue = slider->value();
+        const QRect groove = slider->style()->subControlRect(
+            QStyle::CC_Slider, &option, QStyle::SC_SliderGroove, slider);
+        const QRect handle = slider->style()->subControlRect(
+            QStyle::CC_Slider, &option, QStyle::SC_SliderHandle, slider);
+        QVERIFY2(groove.height() >= background.height() + 2,
+                 qPrintable(QString("Groove height %1 clips the %2 px background; slider height %3, style: %4")
+                                .arg(groove.height()).arg(background.height())
+                                .arg(slider->height()).arg(slider->styleSheet())));
+        QVERIFY(slider->rect().contains(groove));
+        QVERIFY(slider->rect().contains(handle));
+        QVERIFY(handle.width() < slider->width());
     }
 
     void draggingChartCursors()
@@ -485,7 +519,15 @@ private slots:
             QCOMPARE(writes.at(0).at(0).toByteArray(), nextCommand);
         }
         QCOMPARE(module.history.size(), 3);
+        auto *historyStatus = module.getWidget()->findChild<QLabel *>("scopeTopHistoryStatus");
+        QVERIFY(historyStatus);
+        QCOMPARE(historyStatus->text(), QString("History: 3/3"));
+        module.updateTriggerMode(ScopeTriggerMode::TRIG_STOP);
+        QCOMPARE(historyStatus->text(), QString("3/3 (stopped)"));
+        module.updateTriggerMode(ScopeTriggerMode::TRIG_AUTO);
+        QCOMPARE(historyStatus->text(), QString("History: 3/3"));
         module.stopModule();
+        QCOMPARE(historyStatus->text(), QString("3/3 (stopped)"));
         delete module.scpWindow;
         module.scpWindow = nullptr;
     }
@@ -508,6 +550,31 @@ private slots:
         module.config->rangeMin = 0;
         module.config->rangeMax = 3300;
         module.config->numberOfChannels = 2;
+        auto *topNavigation = module.getWidget()->findChild<WidgetButtons *>("scopeTopHistoryButtons");
+        QVERIFY(topNavigation);
+        auto *historyStatus = module.getWidget()->findChild<QLabel *>("scopeTopHistoryStatus");
+        QVERIFY(historyStatus);
+        QCOMPARE(historyStatus->text(), QString("0/0 (stopped)"));
+        auto *previous = topNavigation->findChild<QPushButton *>("pushButton_1");
+        auto *next = topNavigation->findChild<QPushButton *>("pushButton_2");
+        QVERIFY(previous);
+        QVERIFY(next);
+        QCOMPARE(previous->text(), QString("<"));
+        QCOMPARE(next->text(), QString(">"));
+        QVERIFY(!previous->isEnabled());
+        QVERIFY(!next->isEnabled());
+        module.getWidget()->resize(900, 600);
+        module.getWidget()->show();
+        QApplication::processEvents();
+        auto *signalSlider = module.getWidget()->findChild<QSlider *>("sliderSignal");
+        QVERIFY(signalSlider);
+        QVERIFY(previous->isVisible());
+        QVERIFY(next->isVisible());
+        QVERIFY(historyStatus->isVisible());
+        QVERIFY(historyStatus->geometry().left() > signalSlider->geometry().right());
+        QVERIFY(topNavigation->geometry().left() > historyStatus->geometry().right());
+        QVERIFY(topNavigation->geometry().center().y() >= signalSlider->geometry().top());
+        QVERIFY(topNavigation->geometry().center().y() <= signalSlider->geometry().bottom());
         auto *spec = static_cast<ScopeSpec *>(module.getSpecification());
         spec->memorySize = 40000;
         spec->maxADCChannels = 2;
@@ -515,31 +582,65 @@ private slots:
         module.scpWindow->setNumChannels(2);
         module.setAverageWindow(2);
         module.startModule();
+        QCOMPARE(historyStatus->text(), QString("History: 0/0"));
         module.parseData(frame(1000));
+        QCOMPARE(historyStatus->text(), QString("History: 1/1"));
+        QVERIFY(!previous->isEnabled());
+        QVERIFY(!next->isEnabled());
         module.parseData(frame(3000));
         QCOMPARE(module.history.size(), 2);
+        QCOMPARE(historyStatus->text(), QString("History: 2/2"));
+        QVERIFY(previous->isEnabled());
+        QVERIFY(!next->isEnabled());
         QVERIFY(qAbs(module.scopeData[0][0].y() - 2000.0 / 4095 * 3.3) < 1e-12);
         auto *slider = module.getWidget()->findChild<QSlider *>("scopeHistorySlider");
         QVERIFY(slider);
-        slider->setValue(0);
+        QTest::mouseClick(previous, Qt::LeftButton);
+        QCOMPARE(slider->value(), 0);
         QVERIFY(module.browsingHistory);
         QVERIFY(!module.samplingActive);
+        QCOMPARE(historyStatus->text(), QString("1/2 (stopped)"));
+        QVERIFY(!previous->isEnabled());
+        QVERIFY(next->isEnabled());
         QCOMPARE(module.scopeData, module.history.at(0).channels);
         const int pausedWrites = writes.size();
         module.parseData(frame(4000));
         QCOMPARE(writes.size(), pausedWrites);
         QCOMPARE(module.history.size(), 2);
+        QCOMPARE(historyStatus->text(), QString("1/2 (stopped)"));
         auto *navigation = module.getWidget()->findChild<WidgetButtons *>("scopeHistoryButtons");
         QVERIFY(navigation);
-        navigation->clicked(1);
+        QTest::mouseClick(next, Qt::LeftButton);
         QCOMPARE(module.historyIndex, 1);
+        QCOMPARE(slider->value(), 1);
+        QCOMPARE(historyStatus->text(), QString("2/2 (stopped)"));
         QCOMPARE(module.scopeData, module.history.at(1).channels);
         QVERIFY(module.browsingHistory);
+        QVERIFY(!module.samplingActive);
+        QVERIFY(previous->isEnabled());
+        QVERIFY(!next->isEnabled());
+        QTest::mouseClick(next, Qt::LeftButton);
+        QCOMPARE(module.historyIndex, 1);
         navigation->clicked(0);
         QCOMPARE(module.historyIndex, 0);
+        QCOMPARE(historyStatus->text(), QString("1/2 (stopped)"));
+        QVERIFY(!previous->isEnabled());
+        QVERIFY(next->isEnabled());
+        QTest::mouseClick(previous, Qt::LeftButton);
+        QCOMPARE(module.historyIndex, 0);
+        slider->setValue(1);
+        QCOMPARE(historyStatus->text(), QString("2/2 (stopped)"));
+        QVERIFY(previous->isEnabled());
+        QVERIFY(!next->isEnabled());
+        navigation->clicked(0);
+        navigation->clicked(1);
+        QCOMPARE(module.historyIndex, 1);
         navigation->clicked(2);
         QVERIFY(module.samplingActive);
         QVERIFY(!module.browsingHistory);
+        QCOMPARE(historyStatus->text(), QString("History: 2/2"));
+        QVERIFY(previous->isEnabled());
+        QVERIFY(!next->isEnabled());
         QCOMPARE(module.history.averageCount(), 2);
         module.updateCustomSamplingFreq(2000);
         QCOMPARE(module.history.averageCount(), 0);
@@ -569,14 +670,17 @@ private slots:
         module.parseData(frame(100, 2000, 8, 1));
         QVERIFY(!module.samplingActive);
         const int singleCaptureCount = module.history.size();
+        QCOMPARE(historyStatus->text(), QString("%1/%1 (stopped)").arg(singleCaptureCount));
         module.parseData(frame(200, 2000, 8, 1));
         QCOMPARE(module.history.size(), singleCaptureCount);
         module.resumeLive();
         QVERIFY(module.samplingActive);
+        QCOMPARE(historyStatus->text(), QString("History: %1/%1").arg(singleCaptureCount));
         QCOMPARE(module.config->triggerMode, ScopeTriggerMode::TRIG_SINGLE);
         module.parseData(frame(200, 2000, 8, 1));
         QCOMPARE(module.history.size(), singleCaptureCount + 1);
         QVERIFY(!module.samplingActive);
+        QCOMPARE(historyStatus->text(), QString("%1/%1 (stopped)").arg(singleCaptureCount + 1));
         module.selectHistoryCapture(0);
         module.startModule();
         QVERIFY(!module.browsingHistory);

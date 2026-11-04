@@ -24,7 +24,7 @@ QString LabelFormator::formatOutout(qreal value, QString unit, int precision){
     }else if (abs(value)>=0.00000000099){
         str=QString::number(value*1000000000,'f',precision) + " n"+unit;
     }else {
-        str = "0.00 " + unit;
+        str = QString::number(0.0,'f',precision) + " " + unit;
     }
     return str;
 }

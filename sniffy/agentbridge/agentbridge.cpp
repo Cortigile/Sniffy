@@ -1,6 +1,8 @@
 #include "agentbridge.h"
 #include "app/devicemediator.h"
 #include "modules/abstractmodule.h"
+#include "modules/frequencyanalysis/frequencyanalysis.h"
+#include "modules/frequencyanalysis/frequencyanalysiswindow.h"
 
 #include <cmath>
 #include <limits>
@@ -153,6 +155,14 @@ static QJsonObject buildModuleState(QWidget *widget, const QString &moduleName, 
 {
     QJsonObject st;
     st[QStringLiteral("module")] = moduleName;
+
+    if (auto *w = qobject_cast<FrequencyAnalysisWindow *>(widget)) {
+        const QJsonObject analysis = w->state();
+        for (auto it = analysis.begin(); it != analysis.end(); ++it)
+            st.insert(it.key(), it.value());
+        st[QStringLiteral("type")] = QStringLiteral("Frequency analysis");
+        return st;
+    }
 
     // ── Counter ──
     if (auto *w = qobject_cast<CounterWindow *>(widget)) {
@@ -1182,6 +1192,16 @@ void AgentBridge::registerHandlers()
             return QJsonObject{{QStringLiteral("error"), QStringLiteral("Module not active — call module_start first")}, {QStringLiteral("code"), -32001}};
 
         QWidget *w = mod->getWidget();
+
+        if (auto *analysis = qobject_cast<FrequencyAnalysisModule *>(mod.data())) {
+            analysis->startSweep();
+            if (!analysis->isRunning())
+                return QJsonObject{{QStringLiteral("error"), QStringLiteral("Sweep could not start; inspect module state for details")},
+                                   {QStringLiteral("code"), -32001},
+                                   {QStringLiteral("state"), buildModuleState(w, mod->getModuleName(), mod.data())}};
+            return QJsonObject{{QStringLiteral("ok"), true},
+                               {QStringLiteral("state"), buildModuleState(w, mod->getModuleName(), mod.data())}};
+        }
 
         // Sync PWM
         if (auto *win = qobject_cast<SyncPwmWindow *>(w)) {
