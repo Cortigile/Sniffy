@@ -16,6 +16,8 @@ Examples:
     python -m sniffy_mcp call module_start "Sync PWM"
     python -m sniffy_mcp call display_set_history_size Counter HighFreqCounter 555
     python -m sniffy_mcp call spwm_set_frequency "Sync PWM" 0 5000
+    python -m sniffy_mcp call arbgen_set_sweep "Arb. generator" true 100 10000 5
+    python -m sniffy_mcp call arbgen_set_sweep "Arb. generator" true channel=1 scale=exponential mode=symmetric
 """
 
 from __future__ import annotations

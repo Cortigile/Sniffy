@@ -31,10 +31,12 @@ public:
     explicit UserDefined();
     QList<patttype> *getData() override;
     QList<patttype> *create(int len) override;
+    QList<patttype> *resize(int len);
     bool isExponencial() override;
 
 private:
     QList<patttype> *data;
+    QList<patttype> retainedData;
     const bool exp = false;
 };
 

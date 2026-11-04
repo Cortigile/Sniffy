@@ -37,6 +37,10 @@ public:
     void setPWMResolutionLabel(QString res, int index);
     void disableGUI();
     void enableGUI();
+    bool isSweepActive(int channel) const;
+    void prepareSweepFrequencies(int channel = -1);
+    void setChannelFrequencySync(int channel, bool enabled);
+    int getMaxNumChannels() const { return maxNumChannels; }
 
 signals:
 
@@ -48,15 +52,16 @@ public:
     WidgetButtons *buttonsMemory;
     WidgetTextInput *customLengthInput;
     WidgetButtons *buttonSelectFile;
-    WidgetButtons *buttonSWSweepEnable;
+    WidgetButtons *buttonSWSweepEnable[MAX_SWEEP_CHANNELS_NUM];
+    WidgetButtons *buttonsSweepScale[MAX_SWEEP_CHANNELS_NUM];
+    WidgetButtons *buttonsSweepMode[MAX_SWEEP_CHANNELS_NUM];
+    WidgetButtons *buttonSweepSyncWithCH1;
     WidgetLabel *labelArbFileInfo;
     int arbChannelsEnabled = 0;
 
-    WidgetDialRange *dialFreqSweepMin;
-    WidgetDialRange *dialFreqSweepMax;
-    WidgetDialRange *dialSweepTime;
-
-    QHBoxLayout *sweepControl;
+    WidgetDialRange *dialFreqSweepMin[MAX_SWEEP_CHANNELS_NUM];
+    WidgetDialRange *dialFreqSweepMax[MAX_SWEEP_CHANNELS_NUM];
+    WidgetDialRange *dialSweepTime[MAX_SWEEP_CHANNELS_NUM];
 
     int numChannelsEnabled = 1;
     MemoryLength memorySet = MemoryLength::BEST_FIT;
@@ -85,7 +90,7 @@ public:
     bool channelEnabled[MAX_ARB_CHANNELS_NUM];
     bool channelSyncWithCH1[MAX_ARB_CHANNELS_NUM];
     bool channelSyncPWMWithCH1[MAX_ARB_CHANNELS_NUM];
-    bool isSweepEnabled = false;
+    bool isSweepEnabled[MAX_SWEEP_CHANNELS_NUM] = {};
     bool isPWMbased = false;
     bool GUIEnabled = true;
     bool isSilentGUIUpdate = false;
@@ -94,6 +99,12 @@ public:
 private:
     void copyFreq(int fromCh, int toCh);
     void copyPWMFreq(int fromCh, int toCh);
+    void createSweepControls(QWidget *parent);
+    void updateSweepControls();
+    QWidget *sweepChannelArea[MAX_SWEEP_CHANNELS_NUM];
+    QWidget *sweepControlsArea[MAX_SWEEP_CHANNELS_NUM];
+    QWidget *sweepParametersArea[MAX_SWEEP_CHANNELS_NUM];
+    int maxNumChannels = MAX_ARB_CHANNELS_NUM;
 
 signals:
     void signalChanged();
@@ -109,10 +120,10 @@ private slots:
     void signalChangedCallback();
     void memoryCallback(int index);
     void customLenghtCallback(qreal value);
-    void sweepMaxCallback(qreal value);
-    void sweepMinCallback(qreal value);
-    void buttonSweepCallback(int index);
-    void sweepSettingsCallback();
+    void sweepMaxCallback(qreal value, int channel);
+    void sweepMinCallback(qreal value, int channel);
+    void buttonSweepCallback(int index, int channel);
+    void sweepSettingsCallback(int channel);
 };
 
 #endif // ARBGENPANELSETTINGS_H

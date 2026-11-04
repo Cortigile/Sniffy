@@ -842,7 +842,16 @@ Při změně frekvence nebo při sweepu se může zejména ve vyšších frekven
 
 #### Rozmítání frekvence
 
-Sweep je implementovaný softwarově a generovací frekvence se aktualizuje přibližně každých 50 ms. Ovlivňuje primárně kanál CH1 a ostatní kanály se mohou připojit přes synchronizaci frekvence.
+Záložka **Sweep** vedle záložek kanálů obsahuje svisle uspořádané ovládací prvky. CH1 a CH2 mají nezávislé zapnutí sweepu, minimální a maximální frekvenci, čas, průběh a režim. Ovládání CH2 se zobrazí, pokud je druhý kanál dostupný a zapnutý. Stejné ovládání je dostupné také v PWM generátoru.
+
+- **Linear** mění frekvenci po stejných přírůstcích; **Exponential** ji mění ve stejném poměru (logaritmické rozložení frekvencí).
+- **Saw** zvyšuje frekvenci od minima k maximu, při další aktualizaci skočí zpět na minimum a opakuje se.
+- **Up / down** symetricky zvyšuje frekvenci k maximu a snižuje ji zpět bez skoku v bodech obratu.
+- **Sweep time (per leg)** určuje čas jednoho směru. Celý cyklus nahoru/dolů trvá dvojnásobek tohoto času.
+
+Volba **Sync with CH1** v sekci CH2 nastaví CH1 jako hlavní kanál. Jde o stejnou frekvenční synchronizaci jako v záložce CH2: druhý kanál sleduje frekvenci i sweep CH1 a jeho nezávislé ovládání sweepu je zakázané, ale nastavení se neztratí. Vypnutí synchronizace obnoví nezávislé ovládání.
+
+Sweep je implementovaný softwarově s aktualizací frekvence přibližně každých 50 ms. Synchronizované kanály se stejnou délkou vzorků používají společnou aktualizaci frekvence ve firmwaru, tedy stávající cestu pro zachování fázové synchronizace a nastaveného fázového posunu. Nezávislé sweepy nejsou fázově svázané; skutečná stabilita fáze závisí na hardwaru, zejména při vysokých frekvencích nebo různých délkách souborů s vlastními daty.
 
 Parametry sweepu lze měnit i za běhu, ale stále platí omezení vycházející z maximální frekvence DAC a zvolené délky paměti.
 
