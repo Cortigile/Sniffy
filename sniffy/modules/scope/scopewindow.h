@@ -46,6 +46,7 @@ class WidgetButtons;
 class WidgetDial;
 class WidgetDialRange;
 class WidgetTextInput;
+class QLabel;
 enum class Cursor;
 
 #include <QVector>
@@ -85,7 +86,7 @@ public:
     void mathError(int errorPosition);
     void restoreGUIAfterStartup();
     void setCaptureMetadata(const ScopeCapture &capture);
-    void setHistoryState(int count, int index, bool browsing, int averageCount, int averageWindow);
+    void setHistoryState(int count, int index, bool browsing, int averageCount, int averageWindow, bool acquisitionRunning);
     void setAcquisitionRunning(ScopeTriggerMode mode);
 
 
@@ -174,6 +175,8 @@ private:
     PanelCursors *panelCursors;
     PanelMath *panelMath;
     PanelAdvanced *panelAdvanced;
+    QLabel *historyStatus;
+    WidgetButtons *historyNavigation;
 
     int triggerChannelIndex = 0;
     int fftChannelIndex = 0;

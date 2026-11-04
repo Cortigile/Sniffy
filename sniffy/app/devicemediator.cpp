@@ -47,14 +47,28 @@ QList<QSharedPointer<AbstractModule>> DeviceMediator::createModulesList()
 {
     QList<QSharedPointer<AbstractModule>> tmpModules;
     tmpModules.append(QSharedPointer<AbstractModule>(device = new Device(this)));
-    tmpModules.append(QSharedPointer<AbstractModule>(new Scope(this)));
+    auto *scope = new Scope(this);
+    tmpModules.append(QSharedPointer<AbstractModule>(scope));
     tmpModules.append(QSharedPointer<AbstractModule>(new Counter(this)));
     tmpModules.append(QSharedPointer<AbstractModule>(new Voltmeter(this)));
     tmpModules.append(QSharedPointer<AbstractModule>(new SyncPwm(this)));
-    tmpModules.append(QSharedPointer<AbstractModule>(new ArbGenerator(this)));
+    auto *generator = new ArbGenerator(this);
+    tmpModules.append(QSharedPointer<AbstractModule>(generator));
     tmpModules.append(QSharedPointer<AbstractModule>(new ArbGenerator(this, true)));
     tmpModules.append(QSharedPointer<AbstractModule>(new PatternGenerator(this)));
     tmpModules.append(QSharedPointer<AbstractModule>(new VoltageSource(this)));
+    frequencyAnalysis = new FrequencyAnalysisModule(scope, generator, this);
+    tmpModules.append(QSharedPointer<AbstractModule>(frequencyAnalysis));
+    frequencyAnalysis->setResourceCheck([this](const ResourceSet &candidate) {
+        for (const auto &other : modules) {
+            if (other.data() != frequencyAnalysis && other->isActive()
+                && ResourceSet::collide(candidate, ResourceSet::fromModule(other))) {
+                return tr("Selected ADC pins conflict with %1. Stop that module or choose different pins.")
+                    .arg(other->getModuleName());
+            }
+        }
+        return QString{};
+    });
     //   tmpModules.append(QSharedPointer<AbstractModule> (new TemplateModule(this)));
 
     for (const QSharedPointer<AbstractModule> &mod : tmpModules)
@@ -368,6 +382,7 @@ void DeviceMediator::closeApp()
 
 void DeviceMediator::handleError(QByteArray error)
 {
+    frequencyAnalysis->instrumentError(QString::fromUtf8(error));
     device->errorHandler(error);
 }
 
@@ -376,6 +391,14 @@ void DeviceMediator::parseData(QByteArray data)
     bool isDataPassed = false;
     QByteArray dataHeader = data.left(4);
     QByteArray dataToPass = data.right(data.length() - 4);
+
+    // The host-side analyzer owns these instruments while its resources are reserved.
+    if (frequencyAnalysis->isActive()
+        && (dataHeader == Commands::SCOPE || dataHeader == Commands::SIGNAL_GENERATOR)
+        && dataToPass.left(4) != Commands::CONFIG) {
+        frequencyAnalysis->parseInstrumentData(dataHeader, dataToPass);
+        return;
+    }
 
     for (const QSharedPointer<AbstractModule> &module : modules)
     {
@@ -389,6 +412,11 @@ void DeviceMediator::parseData(QByteArray data)
             }
             if(dataToPass.left(4) == Commands::CONFIG){
                 module->setModuleConfigured();
+                frequencyAnalysis->refreshAvailability();
+                if (frequencyAnalysis->isAvailable() && !frequencyAnalysis->isActive()
+                    && resourceManager.conflicts(ResourceSet::fromModule(frequencyAnalysis))) {
+                    frequencyAnalysis->setModuleStatus(ModuleStatus::LOCKED);
+                }
             }
         }
     }
@@ -417,6 +445,8 @@ void DeviceMediator::parseData(QByteArray data)
         }
     }
     if(dataHeader == Commands::ERROR){
+        frequencyAnalysis->instrumentError(
+            QStringLiteral("Firmware error: %1").arg(QString::fromLatin1(dataToPass.toHex())));
         qDebug() << "ERROR " << dataToPass.toHex();
         //emit popupMessageRequested("Device Error: " + QString::fromUtf8(dataToPass.toHex()));
         isDataPassed = true;
@@ -501,6 +531,9 @@ void DeviceMediator::wireRemainingModules()
     }
 
     remainingModulesWired = true;
+    if (const auto *spec = device->getDeviceSpec())
+        frequencyAnalysis->setTransferRate(!spec->useUsb && spec->uartSpeed > 0
+                                              ? spec->uartSpeed / 10.0 : 0);
     for (int index = 1; index < modules.size(); ++index)
     {
         modules.at(index)->setComms(communication);

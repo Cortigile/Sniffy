@@ -25,6 +25,7 @@ But it can be easily coppied so we can keep some template file.
 #include "gui/widgetbuttons.h"
 #include "gui/widgettab.h"
 #include "gui/widgettextinput.h"
+#include <QLabel>
 #include <QSignalBlocker>
 
 namespace {
@@ -46,6 +47,27 @@ ScopeWindow::ScopeWindow(ScopeConfig *config, QWidget *parent) :
 
     ui->widget_top -> setStyleSheet("background-color:" + Graphics::palette().dataInputArea);
     ui->widget_left->setContentsMargins(4,4,4,4);
+
+    historyStatus = new QLabel("0/0 (stopped)", ui->widget_top);
+    historyStatus->setObjectName("scopeTopHistoryStatus");
+    historyStatus->setAccessibleName("Capture history position and acquisition status");
+    historyStatus->setToolTip("Displayed capture / stored captures. Stopped when acquisition is not running.");
+    historyStatus->setStyleSheet("color:" + Graphics::palette().textLabel);
+    historyStatus->setContentsMargins(8, 0, 0, 0);
+    historyStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    historyStatus->setMinimumWidth(historyStatus->fontMetrics().horizontalAdvance("128/128 (stopped)") + 8);
+    ui->horizontalLayout_top->addWidget(historyStatus);
+
+    historyNavigation = new WidgetButtons(ui->widget_top, 2, ButtonTypes::NORMAL);
+    historyNavigation->setObjectName("scopeTopHistoryButtons");
+    historyNavigation->setText("<", 0);
+    historyNavigation->setText(">", 1);
+    historyNavigation->setFixedWidth(80);
+    historyNavigation->setAccessibleName("Capture history navigation");
+    historyNavigation->setToolTip("Previous / next raw capture. Browsing pauses acquisition.");
+    historyNavigation->setEnabledButton(false, 0);
+    historyNavigation->setEnabledButton(false, 1);
+    ui->horizontalLayout_top->addWidget(historyNavigation);
 
     chart = new widgetChart(ui->widget_chart, 5);
     chart->setRange(-0.1, 0.1, CHART_MIN_Y, CHART_MAX_Y);
@@ -153,14 +175,16 @@ ScopeWindow::ScopeWindow(ScopeConfig *config, QWidget *parent) :
     connect(panelAdvanced->channelXButtons, &WidgetButtons::clicked, this, &ScopeWindow::channelXChangedCallback);
     connect(panelAdvanced->channelYButtons, &WidgetButtons::clicked, this, &ScopeWindow::channelYChangedCallback);
     connect(panelAdvanced->historySlider, &QSlider::valueChanged, this, &ScopeWindow::historyCaptureSelected);
-    connect(panelAdvanced->historyButtons, &WidgetButtons::clicked, this, [this](int index) {
+    const auto navigateHistory = [this](int index) {
         if (index == 2) {
             emit liveRequested();
         } else {
             const int selected = panelAdvanced->historySlider->value() + (index == 0 ? -1 : 1);
             panelAdvanced->historySlider->setValue(selected);
         }
-    });
+    };
+    connect(panelAdvanced->historyButtons, &WidgetButtons::clicked, this, navigateHistory);
+    connect(historyNavigation, &WidgetButtons::clicked, this, navigateHistory);
     const auto averagingChanged = [this]() {
         const bool enabled = panelAdvanced->averagingMode->isCheckedRight();
         panelAdvanced->averageWindow->setEnabled(enabled);
@@ -806,15 +830,18 @@ void ScopeWindow::setCaptureMetadata(const ScopeCapture &capture)
     setRealSamplingRateAndLlength(capture.samplingRate, capture.channels.first().size());
 }
 
-void ScopeWindow::setHistoryState(int count, int index, bool browsing, int averageCount, int averageWindow)
+void ScopeWindow::setHistoryState(int count, int index, bool browsing, int averageCount, int averageWindow, bool acquisitionRunning)
 {
     historyBrowsing = browsing;
+    historyStatus->setText(QString("%1%2/%3%4").arg(acquisitionRunning ? "History: " : "").arg(qMax(0, index + 1)).arg(count).arg(acquisitionRunning ? "" : " (stopped)"));
     const QSignalBlocker blocker(panelAdvanced->historySlider);
     panelAdvanced->historySlider->setRange(0, qMax(0, count - 1));
     panelAdvanced->historySlider->setValue(qMax(0, index));
     panelAdvanced->historySlider->setEnabled(count > 0);
     panelAdvanced->historyButtons->setEnabledButton(index > 0, 0);
     panelAdvanced->historyButtons->setEnabledButton(index >= 0 && index < count - 1, 1);
+    historyNavigation->setEnabledButton(index > 0, 0);
+    historyNavigation->setEnabledButton(index >= 0 && index < count - 1, 1);
     panelAdvanced->historyPosition->setValue(browsing
         ? QString("Raw %1/%2 (paused)").arg(index + 1).arg(count)
         : QString("Live (%1/128)").arg(count));

@@ -1,4 +1,6 @@
 #include "signalcreator.h"
+#include <cmath>
+#include <QDebug>
 
 SignalCreator::SignalCreator(QObject *parent) : QObject(parent)
 {
@@ -70,8 +72,15 @@ QVector<qreal> SignalCreator::createSignal(SignalShape shape, int numSamples, qr
 
 #define BEST_FIT_MAX_ITERATIONS 10000
 
-int SignalCreator::calculateSignalLength(MemoryLength memSet, int customLength,int generatorBufferSize, qreal signalFreq, int maxSamplingRate, int periphClockFrequency)
+int SignalCreator::calculateSignalLength(MemoryLength memSet, int customLength,int generatorBufferSize, qreal signalFreq, int maxSamplingRate, int periphClockFrequency, int minimumLength)
 {
+    if (minimumLength != 2
+        && (minimumLength < 2 || generatorBufferSize / 2 < minimumLength
+            || !std::isfinite(signalFreq) || signalFreq <= 0 || maxSamplingRate <= 0
+            || periphClockFrequency <= 0 || signalFreq * minimumLength > maxSamplingRate)) {
+        qWarning() << "No waveform fits the requested minimum sample count and generator limits.";
+        return 0;
+    }
     int outputLeng=0;
     int divA = periphClockFrequency / maxSamplingRate;
     int divB;
@@ -97,13 +106,13 @@ int SignalCreator::calculateSignalLength(MemoryLength memSet, int customLength,i
         iter = 0;
         while (iter < BEST_FIT_MAX_ITERATIONS){
             tmpSigLeng = periphClockFrequency / signalFreq / div;
-            if(tmpSigLeng<=2){
-                tmpSigLeng = 2;
+            if(tmpSigLeng<=minimumLength){
+                tmpSigLeng = minimumLength;
             }
-            error = fabs(signalFreq - (double)(periphClockFrequency) / (div * (int)(tmpSigLeng)));
+            error = fabs(signalFreq - (double)(periphClockFrequency) / (double(div) * (int)(tmpSigLeng)));
 
             if (tmpSigLeng - 0.0000001 > (generatorBufferSize / 2) || tmpSigLeng * signalFreq > maxSamplingRate){
-                if (tmpSigLeng <= 2){ //length is already clamped, bigger divider cannot help
+                if (tmpSigLeng <= minimumLength){ //length is already clamped, bigger divider cannot help
                     break;
                 }
                 div++;
@@ -118,14 +127,14 @@ int SignalCreator::calculateSignalLength(MemoryLength memSet, int customLength,i
                 break;
             }
 
-            if (tmpSigLeng <=2  || (tmpSigLeng < (generatorBufferSize / 2 / 4) && iter > 20)){
+            if (tmpSigLeng <=minimumLength  || (tmpSigLeng < (generatorBufferSize / 2 / 4) && iter > 20)){
                 break;
             }
             div++;
             iter++;
         }
-        if (bestLeng < 2){ //no candidate passed the buffer/sampling rate limits
-            bestLeng = 2;
+        if (bestLeng < minimumLength){ //no candidate passed the buffer/sampling rate limits
+            bestLeng = minimumLength == 2 ? 2 : 0;
         }
         outputLeng = bestLeng;
         break;
@@ -133,8 +142,8 @@ int SignalCreator::calculateSignalLength(MemoryLength memSet, int customLength,i
     case MemoryLength::LONG:
         div = periphClockFrequency / maxSamplingRate;
         leng = (double)periphClockFrequency / signalFreq / div;
-        if(leng<=2){
-            leng = 2;
+        if(leng<=minimumLength){
+            leng = minimumLength;
         }
         if (leng > generatorBufferSize / 2){
             outputLeng = generatorBufferSize / 2;
@@ -147,8 +156,8 @@ int SignalCreator::calculateSignalLength(MemoryLength memSet, int customLength,i
 
     case MemoryLength::CUSTOM:
         double leng = customLength;
-        if(leng<=2){
-            leng = 2;
+        if(leng<=minimumLength){
+            leng = minimumLength;
         }
         if (leng > generatorBufferSize / 2){
             outputLeng = generatorBufferSize / 2;
@@ -173,4 +182,3 @@ QVector<qreal> SignalCreator::shiftPhase(QVector<qreal> in, qreal phase)
     }
     return tmpData;
 }
-

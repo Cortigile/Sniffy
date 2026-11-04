@@ -1070,6 +1070,55 @@ Voltage source slouží k nastavování analogových DC úrovní na dostupných 
 
 ![Voltage source s více kanály a ovládáním napěťových úrovní](assets/images/voltage_source_view.png){.manual-scale--80}
 
+### 16.1 Frekvenční analýza (Frequency analysis)
+
+Frekvenční analýza postupně mění sinusové buzení a měří přenos testovaného obvodu (DUT) **H = výstup / vstup** pomocí dvou vstupů osciloskopu. Jde o kombinaci osciloskopu a arbitrárního DAC generátoru řízenou z počítače, nikoli o samostatný přístroj ve firmware. Dostupnost i proveditelné nastavení závisí na desce, firmware a omezeních demo režimu: je nutný DAC výstup a nejméně dva ADC vstupy. Zdroje osciloskopu a DAC zůstávají rezervované po celou dobu otevření modulu, i mezi jednotlivými sweepy.
+
+#### Zapojení
+
+- Připojte **DAC CH1** na vstup DUT a **scope CH1** na stejný vstup jako referenci.
+- Výstup DUT připojte na **scope CH2** jako odezvu a propojte **společnou zem**.
+- V záložce **Connection** vyberte externí ADC pin pro **Reference CH1** a **Response CH2** ze seznamů poskytnutých deskou. Volba **Default** použije výchozí pin daného kanálu z firmware.
+- Amplituda je **Vpp (špička–špička)**, nikoli RMS. Sinusový výstup se pohybuje od **offset − Vpp/2** do **offset + Vpp/2**. Celý tento rozsah musí zůstat v mezích DAC a oba měřené signály v mezích ADC. Zohledněte zesílení DUT, stejnosměrnou složku, zatížení a možné ořezání.
+
+#### Nastavení a spuštění sweepu
+
+1. Nastavte počáteční/koncovou frekvenci (kladnou a přísně rostoucí), počáteční/koncovou amplitudu ve Vpp a počet bodů na dekádu.
+2. V záložce **Acquisition** zvolte nezávisle **Linear** nebo **Logarithmic** pro rozložení frekvence i amplitudy. Obě frekvenční rozložení používají **ceil(log10(koncová frekvence / počáteční frekvence) × body na dekádu)** intervalů a zahrnují oba krajní body. Přepínač mění rozmístění bodů, nikoli tento počet intervalů.
+3. Amplituda se mezi krajními hodnotami interpoluje podle normalizovaného indexu bodu **t = i / počet intervalů**: pro Linear platí **A(t) = Astart + t(Astop − Astart)**, pro Logarithmic **A(t) = Astart × (Astop/Astart)^t**. Obě krajní hodnoty Vpp musí být kladné.
+4. Nastavte DC offset, počet průměrování, cílový počet pozorovaných period (**16–512**) a dobu ustálení (**0–10 s**, s milisekundovým rozlišením). Rozsah amplitudy a offsetu odpovídá nahlášeným napěťovým mezím DAC desky (obvykle **0–VCC** pro offset a nejvýše **VCC Vpp** pro amplitudu); celý rozsah offset ± Vpp/2 se stále musí vejít do mezí DAC. Vzorkovací frekvence a délka záznamu se volí automaticky; ovládání vzorků na periodu již není dostupné. V aliasovém režimu jde o periodu pozorovaného aliasu. Dials frekvence, amplitudy, offsetu a ustálení zobrazují tři desetinná místa ve vybrané jednotce a během psaní nepřepisují text. Počet bodů, průměrů a period používá stejné nastavení bez desetinných míst a adaptivní tlačítka +/- jako ovládání počtu vzorků v čítači. Doba ustálení používá sekundy s běžnými předponami **ms/s**, nikoli „kms“.
+5. Použijte zvýrazněné ovládání spuštění, zastavení/zrušení a exportu pod záložkami ve stejném ovládacím panelu. Před spuštěním se ověří nastavení generátoru, akvizice a konflikty vybraných pinů. Rozsah zadávání frekvence v UI není údajem o šířce pásma desky. Zastavení ponechá dosavadní výsledky.
+
+V každém bodě se použije hledání délky periody a děliče v režimu **Best fit** arbitrárního generátoru a nahraje se nová perioda sinusovky. Jsou vyžadovány nejméně **čtyři vzorky DAC na periodu**, takže digitální mez generování odpovídá čtvrtině nahlášeného limitu vzorkování DAC; použitelná analogová mez může být nižší. Vzorkování i ustálení vycházejí ze skutečné frekvence vrácené generátorem. Výchozí nastavení používá **32 pozorovaných period a čtyři průměry křížového spektra**. Automatické plánování cílí přibližně na 32 vzorků pozorované periody a zvolí délku záznamu jako mocninu dvou v mezích desky a paměti. Záznam delší než 30 minut je odmítnut.
+
+Počet period je cílem plánování, nikoli přísnou podmínkou skutečného záznamu. Kratší záznam se použije, pokud jeho skutečná rychlost a délka bezpečně rozliší signál a obsahují nejméně **16 pozorovaných period**. Skutečný počet je uveden v **Data** a CSV; dokončený sweep oznámí omezení cílového počtu. Pokud není splněno Fourierovo minimum, ovládání podle skutečné rychlosti ADC prodlouží záznam, dovolí-li to paměť, nebo upraví vzorkovací požadavek s omezeným počtem opakování. Neplatné zesílení či fáze se nepřijímají.
+
+Odhad pro **bod s nejnižší frekvencí** a **celý sweep** nyní počítá s timeoutem rychlého automatického triggeru **F_A_**, průměrováním a ustálením (nejméně tři fyzické periody), nikoli jen s optimistickým časem záznamu. Zahrnuje nahrání průběhu a přenos záznamů podle nahlášené rychlosti UART, pokud se používá. Latence USB, potvrzování bloků, zpracování a režie příkazů se zjišťují z dokončených bodů a odhad zpřesňují; geometrie generátoru se ukládá do cache, aby aktualizace neopakovaly hledání Best fit. Před změřením neznámé režie USB/přístroje na ni UI výslovně upozorňuje. Odhad není zárukou času dokončení. Ideální výchozí bod 10 Hz používá Fs = 320 Hz a N = 1024; rozpočet akvizice s ustálením a rychlým automatickým triggerem je přibližně **25,9 s před započtením přenosu a režie přístroje**.
+
+Po stisku **Cancel** vyčkejte, až se dočtou čekající odpovědi přístroje a stav potvrdí zrušení; teprve potom spouštějte další sweep. Po úspěšném dokončení zrušení lze znovu začít bez opětovného připojení. **Zavření modulu během sweepu nebo timeout přístroje vyžaduje před dalším spuštěním opětovné připojení desky**: odpovědi protokolu nemají identifikátory transakcí, a proto je nutné pozdní odpovědi bezpečně oddělit od nového sweepu novým připojením. Samotné znovuotevření okna nebo načtení session tento požadavek neodstraní.
+
+Načtení session obnoví nastavení, ale **nikdy samo nespustí sweep**. Starší nastavení vzorků na periodu se ignoruje; hodnoty mimo aktuální napěťové meze nebo limity period a ustálení jsou odmítnuty s chybou, nikoli tiše omezeny při načítání. Doba ustálení zůstává v uložených datech v milisekundách kvůli kompatibilitě. Volba společného grafu se ukládá; session bez této volby zachová oddělené grafy. **Unwrap phase** odstraní umělé skoky na ±180° volbou nejbližší větve po 360°: například +170° následovaných −170° zobrazí jako +190°, tedy souvislou změnu +20°. Mění větev zobrazení, nikoli změřenou fázi; CSV zachovává zabalenou i rozbalenou hodnotu. Při velkých rozestupech bodů nebo prudké změně fáze může být volba větve nejednoznačná.
+
+#### Čtení a export výsledků
+
+Záložka **View** vedle **Connection** obsahuje **Unwrap phase**, **Cursors A/B** a **Gain + phase in one plot**. Toto ovládání zobrazení zůstává dostupné i během sweepu, zatímco nastavení sweepu, akvizice a zapojení jsou uzamčena. Hodnoty kurzorů zůstávají pod grafy.
+
+Dva Bodeho grafy nad sebou zobrazují zesílení v dB a relativní fázi ve stupních proti **skutečné kladné frekvenci generátoru**. Ta se může od požadované frekvence lišit kvůli kvantování hodin a děliček. Volba **Gain + phase in one plot** zobrazí oba průběhy ve společném grafu: zesílení na **levé ose v dB**, fázi na **pravé ose ve stupních**. Zesílení je plnou čarou, fáze přerušovanou. Oba průběhy i čáry, popisky a hodnoty kurzorů používají **barvu CH1**. Přepnutí zachovává měření, rozbalení fáze i pozice kurzorů. Osa X se při vymazání výsledků nebo zahájení sweepu nastaví podle zvoleného frekvenčního rozložení na lineární nebo logaritmickou.
+
+Vedlejší mřížka usnadňuje čtení mezilehlých hodnot. Propojené **kurzory A/B** se pohybují plynule v obou grafech. Mezi měřenými body interpolují zesílení v dB a zobrazenou fázi lineárně v prostoru zvolené frekvenční osy (logaritmus frekvence pro logaritmickou osu, frekvenci pro lineární osu). Hodnoty kurzorů jsou interpolované odhady, nikoli další měření; export sweepu zachovává pouze měřené body.
+
+Záložka **Data** a **Export CSV** obsahují požadovanou i skutečnou frekvenci, naprogramované buzení Vpp, skutečnou vzorkovací frekvenci Fs, délku záznamu N, zesílení, zabalenou i rozbalenou fázi, RMS měřeného tónu na CH1/CH2 a koherenci. Koherence ukazuje konzistenci mezi průměrováními, není certifikátem přesnosti; zejména jediné průměrování spolehlivost měření neprokazuje.
+
+Analýza používá **cílený Fourierův spektrální vzorek s flat-top oknem na skutečné frekvenci generátoru**, nikoli nejvyšší špičku FFT. Před výpočtem odhadu přenosu se průměrují křížová spektra a výkony reference i odezvy. Větší nesouvisející špička se tedy nepovažuje automaticky za budicí signál; rušení, ořezání nebo nedostatečná reference přesto mohou měření znehodnotit.
+
+#### Podvzorkování a relativní fáze
+
+**Allow undersampling (alias mode)** je pro nové session ve výchozím stavu **zapnuto**. Používejte je pouze pro **stacionární sinusový signál s omezeným pásmem**; pokud tyto podmínky neplatí, vypněte je. Uložené session zachovají svou výslovnou volbu zapnuto/vypnuto. Analýza zohledňuje znaménko aliasové frekvence a opravuje odpovídající orientaci fáze. Podvzorkování **nerozšiřuje analogovou šířku pásma ani neodstraňuje harmonické DAC**: harmonické složky, šum a další signály se mohou přeložit na měřený tón.
+
+Modul ověřuje **skutečnou vzorkovací frekvenci vrácenou přístrojem**, nikoli pouze požadovanou hodnotu. V aliasovém režimu může provést **až osm opakovaných pokusů s rozladěnou vzorkovací frekvencí**, aby našel použitelný záznam. Pokud skutečná hodnota stále nesplňuje požadavky na vzorkování, měření skončí výslovnou chybou místo přijetí neplatného výsledku. Tyto pokusy nezaručují měřitelnost libovolné fyzické frekvence.
+
+Ruční ovládání skew již není dostupné. Fáze představuje změřený relativní fázový posun CH2/CH1; rozdíly časování kanálů a analogového vstupu se automaticky nekalibrují. Hodnoty skew ze starší session se při načtení nového ovládání ignorují. Grafy nedokládají kalibrovanou přesnost amplitudy/fáze, zaručenou použitelnou analogovou šířku pásma ani ověření na hardware.
+
 ## 17. Konflikty modulů a pinů
 
 Sniffy sleduje aktivní využití zdrojů a pinů. To má pro uživatele praktické dopady:

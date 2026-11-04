@@ -14,6 +14,7 @@
 #include "modules/voltagesource/voltagesource.h"
 #include "modules/template/templatemodule.h"
 #include "modules/resourcemanager.h"
+#include "modules/frequencyanalysis/frequencyanalysis.h"
 
 // Forward declaration to avoid including the header here
 class Authenticator;
@@ -61,6 +62,7 @@ private:
     QList<DeviceDescriptor> deviceList;
     QList<QSharedPointer<AbstractModule>> modules;
     Device *device;  
+    FrequencyAnalysisModule *frequencyAnalysis = nullptr;
 
     Comms *communication;
 
