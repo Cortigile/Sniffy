@@ -27,10 +27,10 @@ Jump to official project website [sniffylab.com](https://sniffylab.com) for regi
 
 ### Windows
 
-1.  Download the latest installer (`sniffy-x.x.x-win64.exe`) from the [Releases](https://github.com/Cortigile/sniffy/releases) page.
-2.  Run the installer and follow the on-screen instructions.
+1.  Download the installer from the [Microsoft Store](https://apps.microsoft.com/detail/9p0tbx4zs6tg).
+2.  Run the installer. The application should install silently and then open. 
 3.  **Drivers**:
-	*   The application requires ST-Link USB drivers.
+	*   The application requires ST-Link USB drivers which should be installed automaticaly.
 	*   If you have used your Nucleo board on this computer before (with STM32CubeIDE, Keil, etc.), the drivers are already installed.
 	*   If the device is not detected, download and install the **STSW-LINK009** driver from [ST.com](https://www.st.com/en/development-tools/stsw-link009.html).
 
