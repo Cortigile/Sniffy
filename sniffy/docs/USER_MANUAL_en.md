@@ -694,7 +694,7 @@ The history length is included in the saved session layout. These controls also 
 
 - Select the local mains frequency: **50 Hz** (default) or **60 Hz**.
 - Select **1, 2, 4, or 8 periods** per capture; the default is **2**.
-- Select **Slow (5 kHz)** or **Fast (50 kHz)** ADC sampling; the default is Slow.
+- Select **Coarse (5 kHz)** or **Fine (50 kHz)** ADC sampling; the default is Slow.
 
 Period options that exceed the connected board's capture memory are disabled automatically according to the active channels and sampling settings. If the current period count no longer fits, it is reduced to the largest available option.
 

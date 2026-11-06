@@ -39,8 +39,16 @@ private slots:
         VoltmeterWindow window(&config);
         auto *mode = buttons(window, "voltmeterAcquisitionMode");
         auto *multimode = mode->findChild<QPushButton *>("pushButton_2");
+        auto *normal = mode->findChild<QPushButton *>("pushButton_1");
+        auto *samplingLabel = mode->findChild<QLabel *>("label");
+        QVERIFY(normal && samplingLabel);
+        QCOMPARE(samplingLabel->text(), QString("Sampling"));
+        QVERIFY(mode->isHidden());
+        QVERIFY(!normal->isVisibleTo(&window));
+        QVERIFY(!samplingLabel->isVisibleTo(&window));
         QVERIFY(multimode->isHidden());
         window.restoreGUIAfterStartup();
+        QVERIFY(mode->isHidden());
         QVERIFY(!window.isMultimode());
         QCOMPARE(mode->getSelectedIndex(), 0);
         click(mode, 1);
@@ -50,11 +58,17 @@ private slots:
         QStringList inputs[MAX_VOLTMETER_CHANNELS] = {{"PA0", "PA1"}};
         int selectors[MAX_VOLTMETER_CHANNELS] = {};
         window.setInputCapabilities(inputs, selectors, 1);
+        QVERIFY(!mode->isHidden());
+        QVERIFY(normal->isVisibleTo(&window));
+        QVERIFY(samplingLabel->isVisibleTo(&window));
         QVERIFY(!multimode->isHidden());
         QVERIFY(multimode->isEnabled());
         QVERIFY(window.isMultimode());
 
         window.setInputCapabilities(inputs, selectors, 0);
+        QVERIFY(mode->isHidden());
+        QVERIFY(!normal->isVisibleTo(&window));
+        QVERIFY(!samplingLabel->isVisibleTo(&window));
         QVERIFY(multimode->isHidden());
         QVERIFY(!window.isMultimode());
         QCOMPARE(mode->getSelectedIndex(), 0);
@@ -89,6 +103,7 @@ private slots:
         QVERIFY(!spec->inputCapabilitiesAvailable);
         for (const auto &inputs : spec->availableInputs)
             QVERIFY(inputs.isEmpty());
+        QVERIFY(buttons(*module.voltWindow, "voltmeterAcquisitionMode")->isHidden());
         QVERIFY(buttons(*module.voltWindow, "voltmeterAcquisitionMode")
                     ->findChild<QPushButton *>("pushButton_2")->isHidden());
     }

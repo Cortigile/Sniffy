@@ -43,7 +43,8 @@ The Qt, compiler-runtime, libusb, and ST-Link DLL directories must be on `PATH` 
 on Windows. The tests use Qt's offscreen platform, require no connected board, and cover
 configuration compatibility, session and mode restoration, input-selection limits, sampling
 counts, memory-limited period options, and reference/multimode capture sequencing.
-They also check that Multimode stays hidden without input capabilities, saved
+They also check that the entire Sampling control (label, Normal and Multimode)
+stays hidden without input capabilities, saved
 Multimode sessions fall back to Normal until discovery succeeds, and reconnecting
 clears the previous board's input catalog.
 Voltage tests inject synthetic measurements; physical ADC settling and accuracy still need board testing.

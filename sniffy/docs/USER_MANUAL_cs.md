@@ -688,7 +688,7 @@ rozložení session. Ovládání funguje také v Multimode.
 
 - Síťová frekvence: **50 Hz** (výchozí) nebo **60 Hz**.
 - Délka měření: **1, 2, 4 nebo 8 period**, výchozí jsou **2**.
-- Vzorkování ADC: **Slow (5 kHz)** nebo **Fast (50 kHz)**, výchozí je Slow.
+- Vzorkování ADC: **Coarse (5 kHz)** nebo **Fine (50 kHz)**, výchozí je Slow.
 
 Počty period, které překračují paměť připojené desky, se automaticky znepřístupní podle aktivních kanálů a nastavení vzorkování. Pokud se aktuální počet period již nevejde, sníží se na nejvyšší dostupnou možnost.
 

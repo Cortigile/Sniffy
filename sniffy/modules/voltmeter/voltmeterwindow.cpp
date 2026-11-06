@@ -134,8 +134,9 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
     tabs->setText("Adv", 2);
     ui->verticalLayout_settings->addWidget(tabs);
 
-    WidgetSeparator *separatorSampling = new WidgetSeparator(this, "Mode");
+    separatorSampling = new WidgetSeparator(this, "Mode");
     tabs->getLayout(0)->addWidget(separatorSampling);
+    separatorSampling->hide();
 
     buttonsAcquisitionMode = new WidgetButtons(this, 2, ButtonTypes::RADIO, "Sampling");
     buttonsAcquisitionMode->setObjectName("voltmeterAcquisitionMode");
@@ -144,6 +145,7 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
     buttonsAcquisitionMode->setText("Multimode", 1);
     buttonsAcquisitionMode->setDisabledButton(true, 1);
     buttonsAcquisitionMode->setButtonHidden(true, 1);
+    buttonsAcquisitionMode->hide();
 
     WidgetSeparator *separatorChannelEnable = new WidgetSeparator(this,"Channel enable");
     tabs->getLayout(0)->addWidget(separatorChannelEnable);
@@ -189,8 +191,8 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
     tabs->getLayout(2)->addWidget(new WidgetSeparator(this, "Sampling"));
     buttonsSamplingRate = new WidgetButtons(this, 2, ButtonTypes::RADIO, "Rate");
     buttonsSamplingRate->setObjectName("voltmeterSamplingRate");
-    buttonsSamplingRate->setText("Slow (5 kHz)", 0);
-    buttonsSamplingRate->setText("Fast (50 kHz)", 1);
+    buttonsSamplingRate->setText("Coarse (5 kHz)", 0);
+    buttonsSamplingRate->setText("Fine (50 kHz)", 1);
     tabs->getLayout(2)->addWidget(buttonsSamplingRate);
     tabs->getLayout(2)->addStretch();
 
@@ -455,6 +457,8 @@ void VoltmeterWindow::setInputCapabilities(const QStringList inputs[], const int
         hasSelectableInput = hasSelectableInput || !slotInputs.isEmpty();
     buttonsAcquisitionMode->setDisabledButton(!hasSelectableInput, 1);
     buttonsAcquisitionMode->setButtonHidden(!hasSelectableInput, 1);
+    buttonsAcquisitionMode->setVisible(hasSelectableInput);
+    separatorSampling->setVisible(hasSelectableInput);
     if (!hasSelectableInput || restoreMultimode) {
         buttonsAcquisitionMode->setChecked(true, hasSelectableInput ? 1 : 0);
         acquisitionModeCallback(buttonsAcquisitionMode->getSelectedIndex());
