@@ -25,6 +25,7 @@ public:
 
     void setComms(Comms *communication) override;
     void refreshAvailability();
+    bool isDiscoveringInputs() const { return inputTimeout.isActive(); }
     void parseInstrumentData(const QByteArray &prefix, const QByteArray &data);
     void instrumentError(const QString &message);
     bool isRunning() const;

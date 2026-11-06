@@ -57,7 +57,7 @@ FrequencyAnalysisModule::FrequencyAnalysisModule(AbstractModule *adc, AbstractMo
         }
     });
     connect(&inputTimeout, &QTimer::timeout, this, [this] {
-        window->setStatus(tr("ADC pin discovery timed out. Close and reopen the module to retry."), true);
+        window->setStatus(tr("ADC pin discovery timed out. Reconnect the board to retry."), true);
         qWarning() << "Frequency analysis ADC input catalog timed out.";
     });
     connect(scope, &AbstractModule::modulePinFunctions, this,
@@ -91,6 +91,7 @@ FrequencyAnalysisModule::~FrequencyAnalysisModule()
 
 void FrequencyAnalysisModule::setComms(Comms *communication)
 {
+    disableModule();
     watchdog.stop();
     settling.stop();
     inputTimeout.stop();
@@ -111,12 +112,16 @@ void FrequencyAnalysisModule::setComms(Comms *communication)
     captureClock.invalidate();
     settlingClock.invalidate();
     window->setRunning(false);
-    refreshAvailability();
+    if (comm) {
+        inputTimeout.start(3000);
+        send(Commands::SCOPE, Commands::GET_SCOPE_INPUTS);
+    }
 }
 
 void FrequencyAnalysisModule::refreshAvailability()
 {
-    if (!comm || !scope || !generator || !scope->isAvailable() || !generator->isAvailable())
+    if (!comm || inputCatalog.inputs.size() < 2 || !scope || !generator
+        || !scope->isAvailable() || !generator->isAvailable())
         return;
     scopeSpec = dynamic_cast<ScopeSpec *>(scope->getSpecification());
     generatorSpec = dynamic_cast<ArbGeneratorSpec *>(generator->getSpecification());
@@ -320,10 +325,6 @@ void FrequencyAnalysisModule::writeConfiguration() {}
 void FrequencyAnalysisModule::startModule()
 {
     setModuleStatus(ModuleStatus::PAUSE);
-    if (comm && state != State::Fault && inputCatalog.inputs.isEmpty()) {
-        send(Commands::SCOPE, Commands::GET_SCOPE_INPUTS);
-        inputTimeout.start(3000);
-    }
     window->setStatus(state == State::Fault
                           ? tr("Reconnect before starting another sweep after an interrupted operation.")
                           : tr("Select reference and response pins in Connection, then start a sweep."),
@@ -758,6 +759,12 @@ void FrequencyAnalysisModule::acceptCapture(const QByteArray &data)
 void FrequencyAnalysisModule::parseInstrumentData(const QByteArray &prefix, const QByteArray &data)
 {
     const QByteArray header = data.left(4);
+    if (prefix == Commands::SCOPE && header == "NACK" && isDiscoveringInputs()) {
+        inputTimeout.stop();
+        window->setStatus(tr("ADC pin discovery was denied by the firmware (check licensing)."), true);
+        qWarning() << "ADC input capability request was denied by the firmware.";
+        return;
+    }
     if (prefix == Commands::SCOPE && header == "INP_") {
         inputTimeout.stop();
         if (state != State::Idle) {
@@ -766,16 +773,14 @@ void FrequencyAnalysisModule::parseInstrumentData(const QByteArray &prefix, cons
         }
         QString error;
         AdcInputCatalog catalog;
-        if (!catalog.parse(data, error) || catalog.inputs.size() < 2) {
-            if (error.isEmpty())
-                error = tr("At least two ADC input slots are required.");
+        if (!catalog.parse(data, error)) {
             window->setStatus(tr("Invalid ADC pin list: %1").arg(error), true);
             qWarning() << "Frequency analysis ADC input catalog:" << error;
             return;
         }
         inputCatalog = std::move(catalog);
-        refreshConnections();
-        if (!updateInputResources(error)) {
+        refreshAvailability();
+        if (isAvailable() && !updateInputResources(error)) {
             window->setStatus(error, true);
             qWarning() << "Frequency analysis ADC inputs:" << error;
         }

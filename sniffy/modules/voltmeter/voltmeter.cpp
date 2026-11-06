@@ -44,6 +44,21 @@ QWidget *Voltmeter::getWidget()
     return voltWindow;
 }
 
+void Voltmeter::setComms(Comms *communication)
+{
+    AbstractModule::setComms(communication);
+    inputCapabilitiesReceived = false;
+    VoltmeterSpec *spec = static_cast<VoltmeterSpec *>(moduleSpecification);
+    spec->inputCapabilitiesAvailable = false;
+    spec->availableInputSlots = 0;
+    for (int slot = 0; slot < MAX_VOLTMETER_CHANNELS; ++slot) {
+        spec->availableInputs[slot].clear();
+        spec->currentInputSelectors[slot] = 0;
+    }
+    logicalChannelNames.clear();
+    voltWindow->setInputCapabilities(spec->availableInputs, spec->currentInputSelectors, 0);
+}
+
 void Voltmeter::parseData(QByteArray data)
 {
     QByteArray dataHeader = data.left(4);
@@ -151,7 +166,6 @@ void Voltmeter::writeConfiguration()
     comm->write(cmd->SCOPE+":"+cmd->SCOPE_TRIG_CHANNEL+":"+cmd->CHANNELS_1+";");
     setNumberOfChannels(numChannelsEnabled);
     comm->write(moduleCommandPrefix+":"+cmd->SCOPE_ADC_CHANNEL_DEAFULT+";");
-    comm->write(moduleCommandPrefix + ":" + cmd->GET_SCOPE_INPUTS + ";");
 
     voltWindow->restoreGUIAfterStartup(static_cast<VoltmeterSpec*>(moduleSpecification)->memorySize);
     if (inputCapabilitiesReceived) {

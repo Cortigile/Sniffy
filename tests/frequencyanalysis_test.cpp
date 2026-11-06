@@ -34,6 +34,7 @@
 #include "modules/arbgenerator/gencommons.h"
 #include "modules/counter/countertablowfreq.h"
 #include "modules/voltmeter/voltmeterspec.h"
+#include "app/devicemediator.h"
 
 namespace {
 class InstrumentStub final : public AbstractModule
@@ -99,7 +100,7 @@ struct Rig
     ModuleDockWidget dock;
     FrequencyAnalysisModule module{&adc, &dac};
 
-    explicit Rig(int channels = 2, bool loadInputs = true)
+    explicit Rig(int channels = 2, bool loadInputs = true, bool configureInstruments = true)
     {
         QObject::disconnect(&comm, &Comms::dataWrite, nullptr, nullptr);
         control.setStatus(ModuleStatus::STOP);
@@ -107,11 +108,58 @@ struct Rig
         module.setModuleControlWidget(&control);
         adcSpec.parseSpecification(scopeSpecification(channels));
         dacSpec.parseSpecification(generatorSpecification());
-        adc.setModuleConfigured();
-        dac.setModuleConfigured();
+        if (configureInstruments) {
+            adc.setModuleConfigured();
+            dac.setModuleConfigured();
+        }
         module.setComms(&comm);
         if (channels >= 2 && loadInputs)
             module.parseInstrumentData(Commands::SCOPE, inputCatalogResponse());
+    }
+};
+
+struct MediatorRig
+{
+    QList<QSharedPointer<WidgetControlModule>> controls;
+    QList<QSharedPointer<ModuleDockWidget>> docks;
+    DeviceMediator mediator{nullptr};
+    Voltmeter *voltmeter = nullptr;
+    FrequencyAnalysisModule *analysis = nullptr;
+
+    MediatorRig()
+    {
+        QObject::disconnect(mediator.getComms(), &Comms::dataWrite, nullptr, nullptr);
+        const auto modules = mediator.getModulesList();
+        for (const auto &module : modules) {
+            auto control = QSharedPointer<WidgetControlModule>::create();
+            control->setStatus(ModuleStatus::STOP);
+            control->hide();
+            auto dock = QSharedPointer<ModuleDockWidget>::create();
+            module->setDockWidgetWindow(dock.data());
+            module->setModuleControlWidget(control.data());
+            controls.append(control);
+            docks.append(dock);
+            if (auto *consumer = qobject_cast<Voltmeter *>(module.data()))
+                voltmeter = consumer;
+            if (auto *consumer = qobject_cast<FrequencyAnalysisModule *>(module.data()))
+                analysis = consumer;
+        }
+        for (int index = 1; index < modules.size(); ++index)
+            modules.at(index)->setComms(mediator.getComms());
+        receive(Commands::SCOPE + Commands::CONFIG + scopeSpecification(2));
+        receive(Commands::SIGNAL_GENERATOR + Commands::CONFIG + generatorSpecification());
+    }
+
+    bool receive(const QByteArray &message)
+    {
+        return QMetaObject::invokeMethod(&mediator, "parseData", Qt::DirectConnection,
+                                         Q_ARG(QByteArray, message));
+    }
+
+    QPushButton *multimodeButton() const
+    {
+        return voltmeter->getWidget()->findChild<WidgetButtons *>("voltmeterAcquisitionMode")
+            ->findChild<QPushButton *>("pushButton_2");
     }
 };
 
@@ -300,13 +348,18 @@ private slots:
     void discoveryAndPinChoices()
     {
         Rig rig(2, false);
+        QVERIFY(!rig.module.isAvailable());
+        QVERIFY(rig.control.isHidden());
         QSignalSpy writes(&rig.comm, &Comms::dataWrite);
-        rig.module.widgetControlClicked(ModuleStatus::STOP);
+        rig.module.setComms(&rig.comm);
         QVERIFY(hasCommand(writes, "OSCP:INP?;"));
         rig.module.startSweep();
         QVERIFY(!rig.module.isRunning());
         QVERIFY(!hasCommand(writes, "GENS:STRT;"));
         rig.module.parseInstrumentData(Commands::SCOPE, inputCatalogResponse());
+        QVERIFY(rig.module.isAvailable());
+        QVERIFY(!rig.control.isHidden());
+        rig.module.widgetControlClicked(ModuleStatus::STOP);
         auto *reference = view(rig)->findChild<WidgetSelection *>("referenceInput");
         auto *response = view(rig)->findChild<WidgetSelection *>("responseInput");
         QVERIFY(reference && response);
@@ -322,6 +375,98 @@ private slots:
         QVERIFY(resources.pins.contains("PC2"));
         QVERIFY(resources.pins.contains("PF15"));
         QVERIFY(!resources.pins.contains("PA0"));
+    }
+
+    void sharedDiscoveryGatesBothConsumers_data()
+    {
+        QTest::addColumn<QByteArray>("response");
+        QTest::newRow("NACK") << QByteArray("NACK");
+        QTest::newRow("timeout") << QByteArray();
+        QTest::newRow("malformed") << QByteArray("INP_/PA0/");
+    }
+
+    void sharedDiscoveryGatesBothConsumers()
+    {
+        QFETCH(QByteArray, response);
+        MediatorRig rig;
+        QVERIFY(rig.analysis->isDiscoveringInputs());
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.controls.last()->isHidden());
+        QVERIFY(rig.multimodeButton()->isHidden());
+        QVERIFY(rig.voltmeter->isAvailable());
+
+        if (response.isEmpty()) {
+            QCOMPARE(rig.analysis->inputTimeout.interval(), 3000);
+            QTRY_VERIFY_WITH_TIMEOUT(!rig.analysis->isDiscoveringInputs(), 4500);
+        } else {
+            QVERIFY(rig.receive(Commands::SCOPE + response));
+            QVERIFY(!rig.analysis->isDiscoveringInputs());
+        }
+        rig.analysis->refreshAvailability();
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.controls.last()->isHidden());
+        QVERIFY(rig.multimodeButton()->isHidden());
+
+        QSignalSpy writes(rig.mediator.getComms(), &Comms::dataWrite);
+        rig.voltmeter->widgetControlClicked(ModuleStatus::STOP);
+        QVERIFY(rig.voltmeter->isActive());
+        QVERIFY(!qobject_cast<VoltmeterWindow *>(rig.voltmeter->getWidget())->isMultimode());
+        QVERIFY(!hasCommand(writes, "OSCP:INP?;"));
+        rig.voltmeter->closeModule();
+    }
+
+    void sharedDiscoveryAndReconnect()
+    {
+        MediatorRig rig;
+        QVERIFY(rig.receive(Commands::SCOPE + inputCatalogResponse()));
+        QVERIFY(rig.analysis->isAvailable());
+        QVERIFY(!rig.controls.last()->isHidden());
+        QVERIFY(!rig.multimodeButton()->isHidden());
+        auto *spec = static_cast<VoltmeterSpec *>(rig.voltmeter->getSpecification());
+        QVERIFY(spec->inputCapabilitiesAvailable);
+        QCOMPARE(spec->availableInputSlots, 2);
+
+        rig.mediator.disableModules();
+        rig.voltmeter->setComms(rig.mediator.getComms());
+        rig.analysis->setComms(rig.mediator.getComms());
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.controls.last()->isHidden());
+        QVERIFY(rig.multimodeButton()->isHidden());
+        QVERIFY(!spec->inputCapabilitiesAvailable);
+        QCOMPARE(spec->availableInputSlots, 0);
+        QVERIFY(rig.receive(Commands::SCOPE + Commands::CONFIG + scopeSpecification(2)));
+        QVERIFY(rig.receive(Commands::SIGNAL_GENERATOR + Commands::CONFIG + generatorSpecification()));
+        QVERIFY(rig.receive(Commands::SCOPE + QByteArray("NACK")));
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.multimodeButton()->isHidden());
+
+        rig.analysis->setComms(rig.mediator.getComms());
+        QVERIFY(rig.receive(Commands::SCOPE + inputCatalogResponse()));
+        QVERIFY(rig.analysis->isAvailable());
+        QVERIFY(!rig.multimodeButton()->isHidden());
+    }
+
+    void inputDiscoveryBeforeInstrumentSpecifications()
+    {
+        Rig rig(2, false, false);
+        rig.module.parseInstrumentData(Commands::SCOPE, inputCatalogResponse());
+        QVERIFY(!rig.module.isAvailable());
+        rig.adc.setModuleConfigured();
+        rig.dac.setModuleConfigured();
+        rig.module.refreshAvailability();
+        QVERIFY(rig.module.isAvailable());
+    }
+
+    void singleInputSlotEnablesOnlyVoltmeterMultimode()
+    {
+        MediatorRig rig;
+        QVERIFY(rig.receive(Commands::SCOPE + QByteArray("INP_") + char(0)
+                            + "/PA0:PA1:Vref/"));
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.controls.last()->isHidden());
+        QVERIFY(!rig.multimodeButton()->isHidden());
+        QCOMPARE(static_cast<VoltmeterSpec *>(rig.voltmeter->getSpecification())
+                     ->availableInputSlots, 1);
     }
 
     void selectedPinConflictsBlockOutput()

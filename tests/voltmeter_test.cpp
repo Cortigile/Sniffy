@@ -31,6 +31,68 @@ class VoltmeterTest : public QObject
     }
 
 private slots:
+    void multimodeRequiresCapabilitiesEvenForSavedSessions()
+    {
+        VoltmeterConfig config;
+        config.hasSavedSettings = true;
+        config.multimode = true;
+        VoltmeterWindow window(&config);
+        auto *mode = buttons(window, "voltmeterAcquisitionMode");
+        auto *multimode = mode->findChild<QPushButton *>("pushButton_2");
+        QVERIFY(multimode->isHidden());
+        window.restoreGUIAfterStartup();
+        QVERIFY(!window.isMultimode());
+        QCOMPARE(mode->getSelectedIndex(), 0);
+        click(mode, 1);
+        QVERIFY(!window.isMultimode());
+        QCOMPARE(mode->getSelectedIndex(), 0);
+
+        QStringList inputs[MAX_VOLTMETER_CHANNELS] = {{"PA0", "PA1"}};
+        int selectors[MAX_VOLTMETER_CHANNELS] = {};
+        window.setInputCapabilities(inputs, selectors, 1);
+        QVERIFY(!multimode->isHidden());
+        QVERIFY(multimode->isEnabled());
+        QVERIFY(window.isMultimode());
+
+        window.setInputCapabilities(inputs, selectors, 0);
+        QVERIFY(multimode->isHidden());
+        QVERIFY(!window.isMultimode());
+        QCOMPARE(mode->getSelectedIndex(), 0);
+        window.saveSettingsToConfig();
+        QVERIFY(!config.multimode);
+    }
+
+    void reconnectClearsInputCapabilities()
+    {
+        Comms communication;
+        QObject::disconnect(&communication, &Comms::dataWrite, nullptr, nullptr);
+        WidgetControlModule control;
+        control.setStatus(ModuleStatus::STOP);
+        ModuleDockWidget dock;
+        Commands commands;
+        Voltmeter module;
+        module.cmd = &commands;
+        module.setDockWidgetWindow(&dock);
+        module.setModuleControlWidget(&control);
+        module.setComms(&communication);
+        module.parseData(QByteArray("INP_") + char(0) + "/PA0:PA1:Vref/");
+        QVERIFY(module.inputCapabilitiesReceived);
+        click(buttons(*module.voltWindow, "voltmeterAcquisitionMode"), 1);
+        QVERIFY(module.voltWindow->isMultimode());
+        QVERIFY(module.logicalChannelCount() > 0);
+
+        module.setComms(&communication);
+        QVERIFY(!module.inputCapabilitiesReceived);
+        QVERIFY(!module.voltWindow->isMultimode());
+        QCOMPARE(module.logicalChannelCount(), 0);
+        auto *spec = static_cast<VoltmeterSpec *>(module.getSpecification());
+        QVERIFY(!spec->inputCapabilitiesAvailable);
+        for (const auto &inputs : spec->availableInputs)
+            QVERIFY(inputs.isEmpty());
+        QVERIFY(buttons(*module.voltWindow, "voltmeterAcquisitionMode")
+                    ->findChild<QPushButton *>("pushButton_2")->isHidden());
+    }
+
     void normalConsolidatedChannelColors()
     {
         VoltmeterConfig config;

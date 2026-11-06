@@ -43,6 +43,9 @@ The Qt, compiler-runtime, libusb, and ST-Link DLL directories must be on `PATH` 
 on Windows. The tests use Qt's offscreen platform, require no connected board, and cover
 configuration compatibility, session and mode restoration, input-selection limits, sampling
 counts, memory-limited period options, and reference/multimode capture sequencing.
+They also check that Multimode stays hidden without input capabilities, saved
+Multimode sessions fall back to Normal until discovery succeeds, and reconnecting
+clears the previous board's input catalog.
 Voltage tests inject synthetic measurements; physical ADC settling and accuracy still need board testing.
 
 ## Signal / PWM generator
@@ -104,6 +107,9 @@ CH1 trace/cursor colors, minor grids, manual multi-digit editing, zero-decimal
 integer controls matching the counter's sample-count dials, board-backed voltage limits, the 512-period and 10-second limits,
 ms/s settling units and session compatibility, aliasing enabled by default, stable
 timing labels during learned-overhead updates, and capability gating without a connected board.
+Connection-time discovery tests cover shared response routing to the idle voltmeter
+and analyzer, NACK, a 3-second timeout, malformed responses, response/specification
+ordering, and reconnects without retaining licensed features from the previous board.
 Uncertainty tests cover the View toggle and its session compatibility, CH1 shaded
 three-sigma bands on linear/logarithmic and separate/combined plots, axis ranges and legends,
 phase wrapping, unavailable-estimate gaps, measured averaging-count provenance,

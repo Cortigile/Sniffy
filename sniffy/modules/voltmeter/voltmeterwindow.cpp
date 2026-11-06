@@ -143,6 +143,7 @@ VoltmeterWindow::VoltmeterWindow(VoltmeterConfig *config, QWidget *parent) :
     buttonsAcquisitionMode->setText("Normal", 0);
     buttonsAcquisitionMode->setText("Multimode", 1);
     buttonsAcquisitionMode->setDisabledButton(true, 1);
+    buttonsAcquisitionMode->setButtonHidden(true, 1);
 
     WidgetSeparator *separatorChannelEnable = new WidgetSeparator(this,"Channel enable");
     tabs->getLayout(0)->addWidget(separatorChannelEnable);
@@ -283,7 +284,7 @@ void VoltmeterWindow::restoreGUIAfterStartup(int memoryLimit)
     samplingMemoryLimit = memoryLimit;
     if (config->hasSavedSettings) {
         buttonsChannelEnable->restoreGeometry(QByteArray::number(config->channelMask));
-        buttonsAcquisitionMode->setChecked(true, config->multimode ? 1 : 0);
+        buttonsAcquisitionMode->setChecked(true, config->multimode && hasSelectableInput ? 1 : 0);
         buttonsMode->setChecked(true, static_cast<int>(config->mode));
         dialAveraging->setRealValue(config->averaging);
         buttonsMainsFrequency->setChecked(true, config->mainsFrequency == 60 ? 1 : 0);
@@ -369,11 +370,13 @@ int VoltmeterWindow::enabledChannelMask() const
 
 bool VoltmeterWindow::isMultimode() const
 {
-    return buttonsAcquisitionMode && buttonsAcquisitionMode->getSelectedIndex() == 1;
+    return hasSelectableInput && buttonsAcquisitionMode
+        && buttonsAcquisitionMode->getSelectedIndex() == 1;
 }
 
 void VoltmeterWindow::setInputCapabilities(const QStringList inputs[], const int selectors[], int numSlots)
 {
+    const bool restoreMultimode = !hasSelectableInput && config->hasSavedSettings && config->multimode;
     availableInputs.clear();
     availableInputSelectors.clear();
     inputButtonRows.clear();
@@ -451,7 +454,13 @@ void VoltmeterWindow::setInputCapabilities(const QStringList inputs[], const int
     for (const QStringList &slotInputs : availableInputs)
         hasSelectableInput = hasSelectableInput || !slotInputs.isEmpty();
     buttonsAcquisitionMode->setDisabledButton(!hasSelectableInput, 1);
-    inputSelectionCallback();
+    buttonsAcquisitionMode->setButtonHidden(!hasSelectableInput, 1);
+    if (!hasSelectableInput || restoreMultimode) {
+        buttonsAcquisitionMode->setChecked(true, hasSelectableInput ? 1 : 0);
+        acquisitionModeCallback(buttonsAcquisitionMode->getSelectedIndex());
+    } else {
+        inputSelectionCallback();
+    }
 }
 
 QList<int> VoltmeterWindow::selectedInputIndices(int slot) const
@@ -527,6 +536,11 @@ void VoltmeterWindow::inputSelectionCallback()
 
 void VoltmeterWindow::acquisitionModeCallback(int index)
 {
+    if (index == 1 && !hasSelectableInput) {
+        qWarning() << "Voltmeter multimode requires firmware input capabilities.";
+        buttonsAcquisitionMode->setChecked(true, 0);
+        index = 0;
+    }
     const bool multimode = index == 1;
     if (multimode != wasMultimode)
         clearConsolidatedHistory();

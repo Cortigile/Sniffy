@@ -21,6 +21,7 @@ class Voltmeter : public AbstractModule
     Q_OBJECT
 public:
     explicit Voltmeter(QObject *parent = nullptr);
+    void setComms(Comms *communication) override;
     QWidget* getWidget();
     const ChannelData& channelData(int ch) const { return data[ch]; }
     const ChannelData& logicalChannelData(int index) const { return logicalData[index]; }
