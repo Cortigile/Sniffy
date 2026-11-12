@@ -329,15 +329,13 @@ void Authenticator::onFinished(QNetworkReply *reply)
         stopPolling();
     }
 
-    QDateTime previousValidity = CustomSettings::getTokenValidity();
-
     // Manual login success should reopen the device once so the MCU receives
-    // the new token. Background refreshes must not normally cause a reconnect loop,
-    // except when they silently upgrade a currently-connected demo device to a real
-    // license - the MCU only picks up a new token on the next handshake, so force one.
+    // the new token. A background change between demo and paid access also needs
+    // a handshake, including downgrades; unchanged access must not reconnect.
     QString context = jsonObj["context"].toString();
     const QString license = jsonObj.contains("license") ? jsonObj["license"].toString() : QString();
-    if (!authenticationSentManual && connectedInDemoMode && !license.isEmpty() && license != "DE") {
+    if (!authenticationSentManual && !license.isEmpty()
+        && connectedInDemoMode != (license == "DE")) {
         forceReconnect = true;
     }
     qDebug() << "[Auth] New Token generated: valid till" << validity.toString("yyyy-MM-dd") << "(Context:" << context << ", License:" << license << ") " << (forceReconnect ? "- forcing device reconnection" : "- no device reconnection");

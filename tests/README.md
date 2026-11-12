@@ -1,5 +1,21 @@
 # Regression Tests
 
+## Authentication
+
+```powershell
+cmake -S sniffy -B build-tests -DSNIFFY_BUILD_AUTH_TESTS=ON
+cmake --build build-tests --target authenticator_tests
+ctest --test-dir build-tests --output-on-failure -R authenticator_tests
+```
+
+Use the application's Qt/toolchain settings and put Qt and compiler-runtime DLL
+directories on `PATH` on Windows. The tests inject completed network replies;
+they never contact the website or change saved settings. They check that both
+demo-to-paid and paid-to-demo token refreshes request a new device handshake,
+unchanged access does not cause reconnect loops, and manual login and legacy
+responses retain their behavior. The firmware remains responsible for module
+authorization; a valid login alone is not a paid license.
+
 ## Oscilloscope
 
 Configure with the same Qt/toolchain settings as the application:
@@ -43,6 +59,10 @@ The Qt, compiler-runtime, libusb, and ST-Link DLL directories must be on `PATH` 
 on Windows. The tests use Qt's offscreen platform, require no connected board, and cover
 configuration compatibility, session and mode restoration, input-selection limits, sampling
 counts, memory-limited period options, and reference/multimode capture sequencing.
+They also check that the entire Sampling control (label, Normal and Multimode)
+stays hidden without input capabilities, saved
+Multimode sessions fall back to Normal until discovery succeeds, and reconnecting
+clears the previous board's input catalog.
 Voltage tests inject synthetic measurements; physical ADC settling and accuracy still need board testing.
 
 ## Signal / PWM generator
@@ -92,8 +112,17 @@ positive and negative aliases, skew correction, and cross-spectrum averaging.
 Coherence-derived one-sigma standard errors are checked analytically, against
 seeded independent-noise scatter, and for unavailable or extreme inputs; the
 actual averaging count is checked across captures and averager resets.
+The combined band is checked against the white-quantization window-noise model,
+seeded uniform-noise scatter, isolated-tone finite-record DFT bias bounds,
+quantization/coherence floor selection without double counting, and propagation
+through averaging, plot shading, CSV and agent state.
 Planner tests cover automatic record geometry, safe captures below the planning
 period target, memory/rate limits, and transport/observed-overhead timing estimates.
+Generator tests cover two- and three-sample periods, their 90/15-degree phase shifts,
+unchanged longer-period samples, short uploads and frequency readback, the inclusive
+two-sample and 24-bit transport limits, and matching cached timing estimates.
+Per-point DAC sample counts are checked in the Data table, CSV and agent state,
+independently of ADC record length, including two- and three-sample periods.
 The offscreen module tests exercise the upload/readback/acquisition sequence,
 cancellation, malformed or clipped captures, versioned configuration persistence,
 firmware-backed pin choices and conflicts, standard widget controls, linked plot
@@ -104,6 +133,9 @@ CH1 trace/cursor colors, minor grids, manual multi-digit editing, zero-decimal
 integer controls matching the counter's sample-count dials, board-backed voltage limits, the 512-period and 10-second limits,
 ms/s settling units and session compatibility, aliasing enabled by default, stable
 timing labels during learned-overhead updates, and capability gating without a connected board.
+Connection-time discovery tests cover shared response routing to the idle voltmeter
+and analyzer, NACK, a 3-second timeout, malformed responses, response/specification
+ordering, and reconnects without retaining licensed features from the previous board.
 Uncertainty tests cover the View toggle and its session compatibility, CH1 shaded
 three-sigma bands on linear/logarithmic and separate/combined plots, axis ranges and legends,
 phase wrapping, unavailable-estimate gaps, measured averaging-count provenance,

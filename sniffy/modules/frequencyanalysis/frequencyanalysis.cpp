@@ -57,7 +57,7 @@ FrequencyAnalysisModule::FrequencyAnalysisModule(AbstractModule *adc, AbstractMo
         }
     });
     connect(&inputTimeout, &QTimer::timeout, this, [this] {
-        window->setStatus(tr("ADC pin discovery timed out. Close and reopen the module to retry."), true);
+        window->setStatus(tr("ADC pin discovery timed out. Reconnect the board to retry."), true);
         qWarning() << "Frequency analysis ADC input catalog timed out.";
     });
     connect(scope, &AbstractModule::modulePinFunctions, this,
@@ -91,6 +91,7 @@ FrequencyAnalysisModule::~FrequencyAnalysisModule()
 
 void FrequencyAnalysisModule::setComms(Comms *communication)
 {
+    disableModule();
     watchdog.stop();
     settling.stop();
     inputTimeout.stop();
@@ -111,12 +112,16 @@ void FrequencyAnalysisModule::setComms(Comms *communication)
     captureClock.invalidate();
     settlingClock.invalidate();
     window->setRunning(false);
-    refreshAvailability();
+    if (comm) {
+        inputTimeout.start(3000);
+        send(Commands::SCOPE, Commands::GET_SCOPE_INPUTS);
+    }
 }
 
 void FrequencyAnalysisModule::refreshAvailability()
 {
-    if (!comm || !scope || !generator || !scope->isAvailable() || !generator->isAvailable())
+    if (!comm || inputCatalog.inputs.size() < 2 || !scope || !generator
+        || !scope->isAvailable() || !generator->isAvailable())
         return;
     scopeSpec = dynamic_cast<ScopeSpec *>(scope->getSpecification());
     generatorSpec = dynamic_cast<ArbGeneratorSpec *>(generator->getSpecification());
@@ -320,10 +325,6 @@ void FrequencyAnalysisModule::writeConfiguration() {}
 void FrequencyAnalysisModule::startModule()
 {
     setModuleStatus(ModuleStatus::PAUSE);
-    if (comm && state != State::Fault && inputCatalog.inputs.isEmpty()) {
-        send(Commands::SCOPE, Commands::GET_SCOPE_INPUTS);
-        inputTimeout.start(3000);
-    }
     window->setStatus(state == State::Fault
                           ? tr("Reconnect before starting another sweep after an interrupted operation.")
                           : tr("Select reference and response pins in Connection, then start a sweep."),
@@ -408,7 +409,7 @@ void FrequencyAnalysisModule::startSweep()
     }
     if (generatorSpec->maxDACChannels < 1 || generatorSpec->DACResolution < 1
         || generatorSpec->DACResolution > 16 || generatorSpec->rangeMax <= generatorSpec->rangeMin
-        || generatorSpec->generatorBufferSize < 8 || generatorSpec->maxSamplingRate < 4
+        || generatorSpec->generatorBufferSize < 4 || generatorSpec->maxSamplingRate < 2
         || generatorSpec->periphClockFrequency <= 0) {
         window->setStatus(tr("The board returned unsupported DAC capabilities."), true);
         return;
@@ -420,9 +421,9 @@ void FrequencyAnalysisModule::startSweep()
                               .arg(generatorSpec->rangeMin).arg(generatorSpec->rangeMax), true);
         return;
     }
-    if (settings.stopFrequency * 4 > std::min(generatorSpec->maxSamplingRate, 0x00ffffff)) {
-        window->setStatus(tr("Stop frequency exceeds the board's four-sample sine limit (%1 Hz).")
-                              .arg(std::min(generatorSpec->maxSamplingRate, 0x00ffffff) / 4.0), true);
+    if (settings.stopFrequency * 2 > std::min(generatorSpec->maxSamplingRate, 0x00ffffff)) {
+        window->setStatus(tr("Stop frequency exceeds the board's two-sample waveform limit (%1 Hz).")
+                              .arg(std::min(generatorSpec->maxSamplingRate, 0x00ffffff) / 2.0), true);
         return;
     }
     if (settings.startFrequency < settings.periods / 1800.0) {
@@ -489,9 +490,9 @@ bool FrequencyAnalysisModule::prepareWaveform(QString &error)
     const int memory = std::min(generatorSpec->generatorBufferSize, 131070);
     waveformLength = SignalCreator::calculateSignalLength(
         MemoryLength::BEST_FIT, 0, memory, point.frequency, maxRate,
-        generatorSpec->periphClockFrequency, 4);
-    if (waveformLength < 4 || waveformLength > memory / 2) {
-        error = tr("No best-fit sine with at least four DAC samples is available at %1 Hz.").arg(point.frequency);
+        generatorSpec->periphClockFrequency, 2);
+    if (waveformLength < 2 || waveformLength > memory / 2) {
+        error = tr("No best-fit waveform with at least two DAC samples is available at %1 Hz.").arg(point.frequency);
         return false;
     }
     const double requestedRate = point.frequency * waveformLength;
@@ -504,9 +505,10 @@ bool FrequencyAnalysisModule::prepareWaveform(QString &error)
         error = tr("The requested DAC sampling rate cannot be represented.");
         return false;
     }
+    const int phase = waveformLength == 2 ? 90 : waveformLength == 3 ? 15 : 0;
     const auto volts = SignalCreator::createSignal(
         SignalShape::SINE, waveformLength, point.amplitude / 2, settings.offset,
-        50, 0, generatorSpec->rangeMin, generatorSpec->rangeMax);
+        50, phase, generatorSpec->rangeMin, generatorSpec->rangeMax);
     const int maximumCode = int((quint32(1) << generatorSpec->DACResolution) - 1);
     QList<int> codes;
     codes.reserve(volts.size());
@@ -713,8 +715,8 @@ void FrequencyAnalysisModule::acceptCapture(const QByteArray &data)
         return;
     }
     FrequencyAnalysis::Tone input, output;
-    if (!FrequencyAnalysis::extractTone(reference, actualFrequency, rate, input, error)
-        || !FrequencyAnalysis::extractTone(response, actualFrequency, rate, output, error)) {
+    if (!FrequencyAnalysis::extractTone(reference, actualFrequency, rate, input, error, adcStep)
+        || !FrequencyAnalysis::extractTone(response, actualFrequency, rate, output, error, adcStep)) {
         finish(error, true);
         return;
     }
@@ -734,7 +736,7 @@ void FrequencyAnalysisModule::acceptCapture(const QByteArray &data)
     }
     lowCoherence = lowCoherence || (settings.averages > 1 && result.coherence < 0.9);
     window->appendResult(points[pointIndex].frequency, actualFrequency, points[pointIndex].amplitude,
-                         rate, sampling.samples, result);
+                         rate, sampling.samples, waveformLength, result);
     if (pointClock.isValid()) {
         const double duration = pointClock.nsecsElapsed() / 1e9;
         pointOverheadTotal += std::max(0.0, duration - lastUploadSeconds
@@ -758,6 +760,12 @@ void FrequencyAnalysisModule::acceptCapture(const QByteArray &data)
 void FrequencyAnalysisModule::parseInstrumentData(const QByteArray &prefix, const QByteArray &data)
 {
     const QByteArray header = data.left(4);
+    if (prefix == Commands::SCOPE && header == "NACK" && isDiscoveringInputs()) {
+        inputTimeout.stop();
+        window->setStatus(tr("ADC pin discovery was denied by the firmware (check licensing)."), true);
+        qWarning() << "ADC input capability request was denied by the firmware.";
+        return;
+    }
     if (prefix == Commands::SCOPE && header == "INP_") {
         inputTimeout.stop();
         if (state != State::Idle) {
@@ -766,16 +774,14 @@ void FrequencyAnalysisModule::parseInstrumentData(const QByteArray &prefix, cons
         }
         QString error;
         AdcInputCatalog catalog;
-        if (!catalog.parse(data, error) || catalog.inputs.size() < 2) {
-            if (error.isEmpty())
-                error = tr("At least two ADC input slots are required.");
+        if (!catalog.parse(data, error)) {
             window->setStatus(tr("Invalid ADC pin list: %1").arg(error), true);
             qWarning() << "Frequency analysis ADC input catalog:" << error;
             return;
         }
         inputCatalog = std::move(catalog);
-        refreshConnections();
-        if (!updateInputResources(error)) {
+        refreshAvailability();
+        if (isAvailable() && !updateInputResources(error)) {
             window->setStatus(error, true);
             qWarning() << "Frequency analysis ADC inputs:" << error;
         }

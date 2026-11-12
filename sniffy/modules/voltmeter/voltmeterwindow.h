@@ -92,6 +92,7 @@ private:
     WidgetButtons *buttonsChannelEnable;
     WidgetButtons *buttonsView;
     WidgetButtons *buttonsAcquisitionMode;
+    WidgetSeparator *separatorSampling;
     WidgetButtons *buttonsMode;
     WidgetButtons *buttonsMainsFrequency;
     WidgetButtons *buttonsMainsPeriods;

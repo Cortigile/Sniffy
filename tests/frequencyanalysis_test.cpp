@@ -34,6 +34,7 @@
 #include "modules/arbgenerator/gencommons.h"
 #include "modules/counter/countertablowfreq.h"
 #include "modules/voltmeter/voltmeterspec.h"
+#include "app/devicemediator.h"
 
 namespace {
 class InstrumentStub final : public AbstractModule
@@ -99,7 +100,7 @@ struct Rig
     ModuleDockWidget dock;
     FrequencyAnalysisModule module{&adc, &dac};
 
-    explicit Rig(int channels = 2, bool loadInputs = true)
+    explicit Rig(int channels = 2, bool loadInputs = true, bool configureInstruments = true)
     {
         QObject::disconnect(&comm, &Comms::dataWrite, nullptr, nullptr);
         control.setStatus(ModuleStatus::STOP);
@@ -107,11 +108,58 @@ struct Rig
         module.setModuleControlWidget(&control);
         adcSpec.parseSpecification(scopeSpecification(channels));
         dacSpec.parseSpecification(generatorSpecification());
-        adc.setModuleConfigured();
-        dac.setModuleConfigured();
+        if (configureInstruments) {
+            adc.setModuleConfigured();
+            dac.setModuleConfigured();
+        }
         module.setComms(&comm);
         if (channels >= 2 && loadInputs)
             module.parseInstrumentData(Commands::SCOPE, inputCatalogResponse());
+    }
+};
+
+struct MediatorRig
+{
+    QList<QSharedPointer<WidgetControlModule>> controls;
+    QList<QSharedPointer<ModuleDockWidget>> docks;
+    DeviceMediator mediator{nullptr};
+    Voltmeter *voltmeter = nullptr;
+    FrequencyAnalysisModule *analysis = nullptr;
+
+    MediatorRig()
+    {
+        QObject::disconnect(mediator.getComms(), &Comms::dataWrite, nullptr, nullptr);
+        const auto modules = mediator.getModulesList();
+        for (const auto &module : modules) {
+            auto control = QSharedPointer<WidgetControlModule>::create();
+            control->setStatus(ModuleStatus::STOP);
+            control->hide();
+            auto dock = QSharedPointer<ModuleDockWidget>::create();
+            module->setDockWidgetWindow(dock.data());
+            module->setModuleControlWidget(control.data());
+            controls.append(control);
+            docks.append(dock);
+            if (auto *consumer = qobject_cast<Voltmeter *>(module.data()))
+                voltmeter = consumer;
+            if (auto *consumer = qobject_cast<FrequencyAnalysisModule *>(module.data()))
+                analysis = consumer;
+        }
+        for (int index = 1; index < modules.size(); ++index)
+            modules.at(index)->setComms(mediator.getComms());
+        receive(Commands::SCOPE + Commands::CONFIG + scopeSpecification(2));
+        receive(Commands::SIGNAL_GENERATOR + Commands::CONFIG + generatorSpecification());
+    }
+
+    bool receive(const QByteArray &message)
+    {
+        return QMetaObject::invokeMethod(&mediator, "parseData", Qt::DirectConnection,
+                                         Q_ARG(QByteArray, message));
+    }
+
+    QPushButton *multimodeButton() const
+    {
+        return voltmeter->getWidget()->findChild<WidgetButtons *>("voltmeterAcquisitionMode")
+            ->findChild<QPushButton *>("pushButton_2");
     }
 };
 
@@ -300,13 +348,18 @@ private slots:
     void discoveryAndPinChoices()
     {
         Rig rig(2, false);
+        QVERIFY(!rig.module.isAvailable());
+        QVERIFY(rig.control.isHidden());
         QSignalSpy writes(&rig.comm, &Comms::dataWrite);
-        rig.module.widgetControlClicked(ModuleStatus::STOP);
+        rig.module.setComms(&rig.comm);
         QVERIFY(hasCommand(writes, "OSCP:INP?;"));
         rig.module.startSweep();
         QVERIFY(!rig.module.isRunning());
         QVERIFY(!hasCommand(writes, "GENS:STRT;"));
         rig.module.parseInstrumentData(Commands::SCOPE, inputCatalogResponse());
+        QVERIFY(rig.module.isAvailable());
+        QVERIFY(!rig.control.isHidden());
+        rig.module.widgetControlClicked(ModuleStatus::STOP);
         auto *reference = view(rig)->findChild<WidgetSelection *>("referenceInput");
         auto *response = view(rig)->findChild<WidgetSelection *>("responseInput");
         QVERIFY(reference && response);
@@ -322,6 +375,98 @@ private slots:
         QVERIFY(resources.pins.contains("PC2"));
         QVERIFY(resources.pins.contains("PF15"));
         QVERIFY(!resources.pins.contains("PA0"));
+    }
+
+    void sharedDiscoveryGatesBothConsumers_data()
+    {
+        QTest::addColumn<QByteArray>("response");
+        QTest::newRow("NACK") << QByteArray("NACK");
+        QTest::newRow("timeout") << QByteArray();
+        QTest::newRow("malformed") << QByteArray("INP_/PA0/");
+    }
+
+    void sharedDiscoveryGatesBothConsumers()
+    {
+        QFETCH(QByteArray, response);
+        MediatorRig rig;
+        QVERIFY(rig.analysis->isDiscoveringInputs());
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.controls.last()->isHidden());
+        QVERIFY(rig.multimodeButton()->isHidden());
+        QVERIFY(rig.voltmeter->isAvailable());
+
+        if (response.isEmpty()) {
+            QCOMPARE(rig.analysis->inputTimeout.interval(), 3000);
+            QTRY_VERIFY_WITH_TIMEOUT(!rig.analysis->isDiscoveringInputs(), 4500);
+        } else {
+            QVERIFY(rig.receive(Commands::SCOPE + response));
+            QVERIFY(!rig.analysis->isDiscoveringInputs());
+        }
+        rig.analysis->refreshAvailability();
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.controls.last()->isHidden());
+        QVERIFY(rig.multimodeButton()->isHidden());
+
+        QSignalSpy writes(rig.mediator.getComms(), &Comms::dataWrite);
+        rig.voltmeter->widgetControlClicked(ModuleStatus::STOP);
+        QVERIFY(rig.voltmeter->isActive());
+        QVERIFY(!qobject_cast<VoltmeterWindow *>(rig.voltmeter->getWidget())->isMultimode());
+        QVERIFY(!hasCommand(writes, "OSCP:INP?;"));
+        rig.voltmeter->closeModule();
+    }
+
+    void sharedDiscoveryAndReconnect()
+    {
+        MediatorRig rig;
+        QVERIFY(rig.receive(Commands::SCOPE + inputCatalogResponse()));
+        QVERIFY(rig.analysis->isAvailable());
+        QVERIFY(!rig.controls.last()->isHidden());
+        QVERIFY(!rig.multimodeButton()->isHidden());
+        auto *spec = static_cast<VoltmeterSpec *>(rig.voltmeter->getSpecification());
+        QVERIFY(spec->inputCapabilitiesAvailable);
+        QCOMPARE(spec->availableInputSlots, 2);
+
+        rig.mediator.disableModules();
+        rig.voltmeter->setComms(rig.mediator.getComms());
+        rig.analysis->setComms(rig.mediator.getComms());
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.controls.last()->isHidden());
+        QVERIFY(rig.multimodeButton()->isHidden());
+        QVERIFY(!spec->inputCapabilitiesAvailable);
+        QCOMPARE(spec->availableInputSlots, 0);
+        QVERIFY(rig.receive(Commands::SCOPE + Commands::CONFIG + scopeSpecification(2)));
+        QVERIFY(rig.receive(Commands::SIGNAL_GENERATOR + Commands::CONFIG + generatorSpecification()));
+        QVERIFY(rig.receive(Commands::SCOPE + QByteArray("NACK")));
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.multimodeButton()->isHidden());
+
+        rig.analysis->setComms(rig.mediator.getComms());
+        QVERIFY(rig.receive(Commands::SCOPE + inputCatalogResponse()));
+        QVERIFY(rig.analysis->isAvailable());
+        QVERIFY(!rig.multimodeButton()->isHidden());
+    }
+
+    void inputDiscoveryBeforeInstrumentSpecifications()
+    {
+        Rig rig(2, false, false);
+        rig.module.parseInstrumentData(Commands::SCOPE, inputCatalogResponse());
+        QVERIFY(!rig.module.isAvailable());
+        rig.adc.setModuleConfigured();
+        rig.dac.setModuleConfigured();
+        rig.module.refreshAvailability();
+        QVERIFY(rig.module.isAvailable());
+    }
+
+    void singleInputSlotEnablesOnlyVoltmeterMultimode()
+    {
+        MediatorRig rig;
+        QVERIFY(rig.receive(Commands::SCOPE + QByteArray("INP_") + char(0)
+                            + "/PA0:PA1:Vref/"));
+        QVERIFY(!rig.analysis->isAvailable());
+        QVERIFY(rig.controls.last()->isHidden());
+        QVERIFY(!rig.multimodeButton()->isHidden());
+        QCOMPARE(static_cast<VoltmeterSpec *>(rig.voltmeter->getSpecification())
+                     ->availableInputSlots, 1);
     }
 
     void selectedPinConflictsBlockOutput()
@@ -386,6 +531,94 @@ private slots:
         QCOMPARE(command.size(), 15);
         QCOMPARE(qFromLittleEndian<quint32>(command.constData() + 10), (quint32(8400000) << 8) | 1U);
         QCOMPARE(command.back(), ';');
+    }
+
+    void shortGeneratorWaveforms_data()
+    {
+        QTest::addColumn<double>("frequency");
+        QTest::addColumn<QVector<double>>("normalizedSamples");
+        QTest::newRow("two-samples-90-degrees")
+            << 4200000.0 << QVector<double>{1, -1};
+        QTest::newRow("three-samples-15-degrees")
+            << 2800000.0 << QVector<double>{0.2588190451025207, 0.7071067811865475,
+                                           -0.9659258262890683};
+        QTest::newRow("four-samples-unchanged")
+            << 2100000.0 << QVector<double>{0, 1, 0, -1};
+        QTest::newRow("five-samples-unchanged")
+            << 1680000.0 << QVector<double>{0, 0.9510565162951535, 0.5877852522924731,
+                                           -0.5877852522924731, -0.9510565162951535};
+    }
+
+    void shortGeneratorWaveforms()
+    {
+        QFETCH(double, frequency);
+        QFETCH(QVector<double>, normalizedSamples);
+        Rig rig;
+        rig.module.settings.offset = 1.2;
+        rig.module.points = {{frequency, 0.8}};
+        QString error;
+        QVERIFY2(rig.module.prepareWaveform(error), qPrintable(error));
+        QCOMPARE(rig.module.waveformLength, normalizedSamples.size());
+        QCOMPARE(rig.module.generatorRate, quint32(8400000));
+        QCOMPARE(rig.module.waveform.size(), 1);
+        QCOMPARE(rig.module.waveform[0].size(), normalizedSamples.size());
+        for (qsizetype i = 0; i < normalizedSamples.size(); ++i) {
+            const double voltage = 1.2 + 0.4 * normalizedSamples[i];
+            QCOMPARE(rig.module.waveform[0][i], qRound(voltage / 3.3 * 4095));
+        }
+
+        rig.module.widgetControlClicked(ModuleStatus::STOP);
+        rig.module.generatorTransport = std::make_unique<GenCommons>(
+            Commands::SIGNAL_GENERATOR, &rig.comm, rig.dacSpec.maxSamplingRate);
+        QSignalSpy writes(&rig.comm, &Comms::dataWrite);
+        rig.module.beginPoint();
+        QCOMPARE(rig.module.state, FrequencyAnalysisModule::State::Uploading);
+        QVERIFY(hasCommand(writes, binaryCommand("GENS:LCH1 ", rig.module.waveformLength)));
+        rig.module.parseInstrumentData(Commands::SIGNAL_GENERATOR, Commands::CMD_GEN_NEXT);
+        QCOMPARE(rig.module.state, FrequencyAnalysisModule::State::Frequency);
+        completeReadback(rig, 8400000);
+        QCOMPARE(rig.module.actualFrequency, frequency);
+        QCOMPARE(rig.module.state, FrequencyAnalysisModule::State::Starting);
+    }
+
+    void generatorFrequencyLimit_data()
+    {
+        QTest::addColumn<int>("maximumRate");
+        QTest::addColumn<int>("bufferBytes");
+        QTest::addColumn<double>("stopFrequency");
+        QTest::addColumn<bool>("accepted");
+        QTest::newRow("two-sample-limit") << 8400000 << 8192 << 4200000.0 << true;
+        QTest::newRow("above-two-sample-limit") << 8400000 << 8192 << 4200001.0 << false;
+        QTest::newRow("minimum-buffer") << 8400000 << 4 << 4200000.0 << true;
+        QTest::newRow("protocol-limit") << 20000000 << 8192 << 8388607.5 << true;
+        QTest::newRow("above-protocol-limit") << 20000000 << 8192 << 8388608.0 << false;
+    }
+
+    void generatorFrequencyLimit()
+    {
+        QFETCH(int, maximumRate);
+        QFETCH(int, bufferBytes);
+        QFETCH(double, stopFrequency);
+        QFETCH(bool, accepted);
+        Rig rig;
+        rig.dacSpec.maxSamplingRate = maximumRate;
+        rig.dacSpec.generatorBufferSize = bufferBytes;
+        rig.module.refreshAvailability();
+        rig.module.widgetControlClicked(ModuleStatus::STOP);
+        view(rig)->findChild<WidgetDialRange *>("startFrequency")
+            ->setRealValue(float(stopFrequency * 0.9), true);
+        view(rig)->findChild<WidgetDialRange *>("stopFrequency")
+            ->setRealValue(float(stopFrequency), true);
+        QSignalSpy writes(&rig.comm, &Comms::dataWrite);
+        rig.module.startSweep();
+        QCOMPARE(rig.module.isRunning(), accepted);
+        if (accepted) {
+            QCOMPARE(rig.module.state, FrequencyAnalysisModule::State::Barrier);
+            QVERIFY(hasCommand(writes, "GENS:FRQ?;"));
+        } else {
+            QVERIFY(writes.isEmpty());
+            QVERIFY(view(rig)->state().value("status_error").toBool());
+        }
     }
 
     void sessionRoundTrip()
@@ -532,8 +765,10 @@ private slots:
         result.averages = 8;
         result.gainDb = -6;
         result.phaseDegrees = -30;
+        result.quantizationRelativeStdDev = 0.2;
+        result.dftRelativeErrorBound = 0.03;
         for (const double frequency : {99.5, 999.5, 9999.5})
-            window.appendResult(frequency + 0.5, frequency, 1, 320000, 2048, result);
+            window.appendResult(frequency + 0.5, frequency, 1, 320000, 2048, 32, result);
         const auto measurements = window.state().value("results");
         QVERIFY(uncertaintyBands(gain->chart()).isEmpty());
         auto *tabs = window.findChild<widgetTab *>("frequencyAnalysisSettings")->findChild<QTabWidget *>();
@@ -544,8 +779,9 @@ private slots:
         QTest::mouseClick(toggle->findChild<QPushButton *>("pushButton_1"), Qt::LeftButton);
         if (combined)
             window.findChild<WidgetButtons *>("combinedPlot")->findChild<QPushButton *>("pushButton_1")->click();
-        const double gainError = 20 / std::log(10.0) * 0.125;
-        const double phaseError = 180 / std::acos(-1.0) * 0.125;
+        const double relative = std::hypot(0.2, 0.03 / std::sqrt(3.0));
+        const double gainError = 20 / std::log(10.0) * relative;
+        const double phaseError = 180 / std::acos(-1.0) * relative;
         const auto verify = [&] {
             const auto gainBands = uncertaintyBands(gain->chart());
             const auto phaseBands = uncertaintyBands(phase->chart());
@@ -602,21 +838,22 @@ private slots:
         const auto estimate = first.value("uncertainty").toObject();
         QVERIFY(estimate.value("available").toBool());
         QCOMPARE(estimate.value("standard_deviations").toInt(), 3);
+        QCOMPARE(estimate.value("model").toString(), QString("coherence_quantization_flattop"));
         QVERIFY(qAbs(estimate.value("gain_stddev_db").toDouble() - gainError) < 1e-10);
         QVERIFY(qAbs(estimate.value("phase_stddev_degrees").toDouble() - phaseError) < 1e-10);
         QVERIFY(qAbs(estimate.value("gain_half_width_db").toDouble() - 3 * gainError) < 1e-10);
         QVERIFY(qAbs(estimate.value("phase_half_width_degrees").toDouble() - 3 * phaseError) < 1e-10);
         auto *table = window.findChild<QTableWidget *>("frequencyAnalysisResults");
-        QCOMPARE(table->columnCount(), 16);
+        QCOMPARE(table->columnCount(), 17);
         QCOMPARE(table->item(0, 15)->text(), QString("8"));
         const auto csv = window.csvData().split('\n');
-        QCOMPARE(csv.first().split(',').size(), 19);
+        QCOMPARE(csv.first().split(',').size(), 20);
         const auto fields = csv.at(1).split(',');
-        QCOMPARE(fields.size(), 19);
+        QCOMPARE(fields.size(), 20);
         QCOMPARE(fields.at(15), QByteArray("8"));
         QVERIFY(qAbs(fields.at(16).toDouble() - gainError) < 1e-10);
         QVERIFY(qAbs(fields.at(17).toDouble() - phaseError) < 1e-10);
-        QCOMPARE(fields.at(18), QByteArray("approximate_random_1_sigma"));
+        QCOMPARE(fields.at(18), QByteArray("approximate_combined_1_sigma"));
         QApplication::processEvents();
         const QString snapshot = QString::fromLocal8Bit(qgetenv("SNIFFY_FREQ_UNCERTAINTY_UI_SNAPSHOT"));
         if (!snapshot.isEmpty()) {
@@ -626,9 +863,9 @@ private slots:
         window.clearResults();
         QVERIFY(uncertaintyBands(gain->chart()).isEmpty());
         QVERIFY(uncertaintyBands(phase->chart()).isEmpty());
-        window.appendResult(100, 100, 1, 3200, 2048, result);
+        window.appendResult(100, 100, 1, 3200, 2048, 32, result);
         QVERIFY(uncertaintyBands(gain->chart()).isEmpty());
-        window.appendResult(1000, 1000, 1, 32000, 2048, result);
+        window.appendResult(1000, 1000, 1, 32000, 2048, 32, result);
         QCOMPARE(uncertaintyBands(gain->chart()).size()
                  + uncertaintyBands(phase->chart()).size(), 2);
     }
@@ -651,7 +888,7 @@ private slots:
                 result.averages = 8;
             result.coherence = i == 6 ? 0 : 0.8;
             result.phaseDegrees = i <= 4 ? 179 : -179;
-            window.appendResult(i * 100, i * 100, 1, 32000, 2048, result);
+            window.appendResult(i * 100, i * 100, 1, 32000, 2048, 32, result);
         }
         QCOMPARE(uncertaintyBands(gain->chart()).size(), 3);
         QCOMPARE(uncertaintyBands(phase->chart()).size(), 3);
@@ -715,9 +952,9 @@ private slots:
         FrequencyAnalysis::Result result;
         result.gainDb = -6;
         result.phaseDegrees = 170;
-        window->appendResult(100, 100, 1, 3200, 1024, result);
+        window->appendResult(100, 100, 1, 3200, 1024, 32, result);
         result.phaseDegrees = -170;
-        window->appendResult(1000, 1000, 1, 32000, 1024, result);
+        window->appendResult(1000, 1000, 1, 32000, 1024, 32, result);
         const auto measurements = window->state().value("results");
         const auto settings = window->settings();
         QSignalSpy starts(window, &FrequencyAnalysisWindow::startRequested);
@@ -809,6 +1046,39 @@ private slots:
         QCOMPARE(restored.serialize(), saved);
     }
 
+    void generatorSampleCountsPersistPerPoint()
+    {
+        FrequencyAnalysisWindow window;
+        FrequencyAnalysis::Result result;
+        result.coherence = 1;
+        result.averages = 2;
+        const QList<int> lengths{2, 3, 128};
+        for (qsizetype i = 0; i < lengths.size(); ++i)
+            window.appendResult(100 * (i + 1), 100 * (i + 1), 1, 32000, 2048, lengths[i], result);
+
+        auto *table = window.findChild<QTableWidget *>("frequencyAnalysisResults");
+        QCOMPARE(table->columnCount(), 17);
+        QCOMPARE(table->horizontalHeaderItem(16)->text(), QString("DAC samples/period"));
+        QCOMPARE(table->rowCount(), lengths.size());
+        const auto measurements = window.state().value("results").toArray();
+        const auto csv = window.csvData().split('\n');
+        QCOMPARE(csv.first().split(',').last(), QByteArray("generator_samples_per_period"));
+        for (qsizetype i = 0; i < lengths.size(); ++i) {
+            QCOMPARE(table->item(i, 16)->text(), QString::number(lengths[i]));
+            QCOMPARE(measurements[i].toObject().value("generator_samples_per_period").toInt(), lengths[i]);
+            QCOMPARE(measurements[i].toObject().value("samples").toInt(), 2048);
+            const auto fields = csv[i + 1].split(',');
+            QCOMPARE(fields.size(), 20);
+            QCOMPARE(fields.last().toInt(), lengths[i]);
+            QCOMPARE(fields[4].toInt(), 2048);
+        }
+        for (int invalid : {-1, 0, 1}) {
+            window.appendResult(1000, 1000, 1, 32000, 2048, invalid, result);
+            QCOMPARE(table->rowCount(), lengths.size());
+            QVERIFY(window.state().value("status_error").toBool());
+        }
+    }
+
     void plotsAndTableUseActualFrequency()
     {
         FrequencyAnalysisWindow window;
@@ -818,9 +1088,9 @@ private slots:
         result.gainDb = -6.0206;
         result.phaseDegrees = 170;
         result.coherence = 0.99;
-        window.appendResult(100, 99.5, 1, 3200, 1024, result);
+        window.appendResult(100, 99.5, 1, 3200, 1024, 32, result);
         result.phaseDegrees = -170;
-        window.appendResult(200, 202.5, 1, 6400, 1024, result);
+        window.appendResult(200, 202.5, 1, 6400, 1024, 32, result);
         auto *gain = window.findChild<QChartView *>("frequencyGainPlot");
         auto *phase = window.findChild<QChartView *>("frequencyPhasePlot");
         auto *table = window.findChild<QTableWidget *>("frequencyAnalysisResults");
@@ -963,9 +1233,9 @@ private slots:
         FrequencyAnalysis::Result result;
         result.gainDb = -6;
         result.phaseDegrees = 170;
-        window.appendResult(100, 99.5, 1, 3200, 1024, result);
+        window.appendResult(100, 99.5, 1, 3200, 1024, 32, result);
         result.phaseDegrees = -170;
-        window.appendResult(1000, 999.5, 1, 32000, 1024, result);
+        window.appendResult(1000, 999.5, 1, 32000, 1024, 32, result);
         const auto measured = window.state().value("results");
         const auto cursors = window.state().value("cursors");
         for (auto *plot : {gain, phase}) {
@@ -1065,8 +1335,8 @@ private slots:
         QFETCH(QString, expectedDelta);
         FrequencyAnalysisWindow window;
         FrequencyAnalysis::Result result;
-        window.appendResult(frequencyA, frequencyA, 1, 1000000, 2048, result);
-        window.appendResult(frequencyB, frequencyB, 1, 1000000, 2048, result);
+        window.appendResult(frequencyA, frequencyA, 1, 1000000, 2048, 32, result);
+        window.appendResult(frequencyB, frequencyB, 1, 1000000, 2048, 32, result);
         QCOMPARE(window.findChild<QLabel *>("frequencyCursorAReadout")->text().section(" | ", 0, 0),
                  QString("A: ") + expectedA);
         QCOMPARE(window.findChild<QLabel *>("frequencyCursorBReadout")->text().section(" | ", 0, 0),
@@ -1107,7 +1377,7 @@ private slots:
         for (const double frequency : {100.0, 1000.0, 10000.0, 100000.0}) {
             result.gainDb -= 5;
             result.phaseDegrees -= 10;
-            window.appendResult(frequency, frequency, 1, 1000000, 1056, result);
+            window.appendResult(frequency, frequency, 1, 1000000, 1056, 32, result);
         }
         window.resize(1250, 850);
         window.show();
@@ -1176,7 +1446,7 @@ private slots:
         result.referenceRms = 0.3;
         result.responseRms = 0.15;
         result.coherence = 1;
-        window->appendResult(1000, 1000, 1, 32000, 1056, result);
+        window->appendResult(1000, 1000, 1, 32000, 1056, 32, result);
         window->setRunning(false);
         auto *reference = window->findChild<WidgetSelection *>("referenceInput");
         QVERIFY(reference);
@@ -1251,10 +1521,13 @@ private slots:
         QTest::addColumn<int>("samples");
         QTest::addColumn<bool>("alias");
         QTest::addColumn<int>("averages");
-        QTest::newRow("direct") << 1000.0 << 32000 << 1024 << false << 1;
-        QTest::newRow("negative-alias") << 1000000.0 << 1010000 << 4096 << true << 1;
-        QTest::newRow("positive-alias") << 1000000.0 << 990000 << 4096 << true << 1;
-        QTest::newRow("four-averages") << 1000.0 << 32000 << 1024 << false << 4;
+        QTest::addColumn<int>("generatorSamples");
+        QTest::newRow("direct") << 1000.0 << 32000 << 1024 << false << 1 << 32;
+        QTest::newRow("negative-alias") << 1000000.0 << 1010000 << 4096 << true << 1 << 4;
+        QTest::newRow("positive-alias") << 1000000.0 << 990000 << 4096 << true << 1 << 4;
+        QTest::newRow("four-averages") << 1000.0 << 32000 << 1024 << false << 4 << 32;
+        QTest::newRow("two-generator-samples") << 4200000.0 << 1000000 << 4096 << true << 1 << 2;
+        QTest::newRow("three-generator-samples") << 2800000.0 << 1000000 << 4096 << true << 1 << 3;
     }
 
     void gainAndPhaseFromScope()
@@ -1264,6 +1537,7 @@ private slots:
         QFETCH(int, samples);
         QFETCH(bool, alias);
         QFETCH(int, averages);
+        QFETCH(int, generatorSamples);
         Rig rig;
         rig.module.widgetControlClicked(ModuleStatus::STOP);
         rig.module.settings = FrequencyAnalysis::Settings{};
@@ -1271,6 +1545,7 @@ private slots:
         rig.module.settings.periods = 32;
         rig.module.settings.allowAliasing = alias;
         rig.module.points = {{frequency, 1}};
+        rig.module.waveformLength = generatorSamples;
         rig.module.actualFrequency = frequency;
         rig.module.sampling.requestedRate = rate;
         rig.module.sampling.samples = samples;
@@ -1286,7 +1561,16 @@ private slots:
         QVERIFY(qAbs(result.value("phase_degrees").toDouble() + 45) < 0.2);
         QCOMPARE(result.value("sampling_rate_hz").toInt(), rate);
         QCOMPARE(result.value("averages").toInt(), averages);
+        QCOMPARE(result.value("generator_samples_per_period").toInt(), rig.module.waveformLength);
+        QCOMPARE(view(rig)->findChild<QTableWidget *>("frequencyAnalysisResults")->item(0, 16)->text(),
+                 QString::number(rig.module.waveformLength));
         QCOMPARE(result.value("uncertainty").toObject().value("available").toBool(), averages >= 2);
+        if (averages >= 2) {
+            const auto uncertainty = result.value("uncertainty").toObject();
+            QVERIFY(uncertainty.value("gain_stddev_db").toDouble() > 0);
+            QVERIFY(uncertainty.value("phase_stddev_degrees").toDouble() > 0);
+            QCOMPARE(uncertainty.value("model").toString(), QString("coherence_quantization_flattop"));
+        }
         QCOMPARE(rig.module.state, FrequencyAnalysisModule::State::Draining);
         completeReadback(rig, 32000);
         QCOMPARE(rig.module.state, FrequencyAnalysisModule::State::Idle);
@@ -1306,6 +1590,7 @@ private slots:
         rig.module.settings = FrequencyAnalysis::Settings{};
         rig.module.settings.allowAliasing = true;
         rig.module.points = {{1000000, 1}};
+        rig.module.waveformLength = 4;
         rig.module.actualFrequency = 1000000;
         rig.module.sampling.requestedRate = 1010000;
         rig.module.sampling.samples = 4096;
@@ -1331,6 +1616,7 @@ private slots:
         rig.module.settings = FrequencyAnalysis::Settings{};
         rig.module.settings.averages = 1;
         rig.module.points = {{1000, 1}};
+        rig.module.waveformLength = 32;
         rig.module.actualFrequency = 1000;
         rig.module.sampling.requestedRate = 32000;
         rig.module.sampling.samples = 1056;
@@ -1434,6 +1720,7 @@ private slots:
         rig.module.settings = FrequencyAnalysis::Settings{};
         rig.module.settings.averages = 1;
         rig.module.points = {{1000, 1}};
+        rig.module.waveformLength = 32;
         rig.module.actualFrequency = 1000;
         rig.module.sampling.requestedRate = 32000;
         rig.module.sampling.samples = 1024;
@@ -1466,6 +1753,7 @@ private slots:
         rig.module.settings.averages = 1;
         rig.module.settings.allowAliasing = alias;
         rig.module.points = {{1000, 1}};
+        rig.module.waveformLength = 32;
         rig.module.actualFrequency = 1000;
         rig.module.sampling.requestedRate = 32000;
         rig.module.sampling.samples = 128;
@@ -1490,6 +1778,7 @@ private slots:
         rig.module.settings = FrequencyAnalysis::Settings{};
         rig.module.settings.averages = 1;
         rig.module.points = {{10000, 1}};
+        rig.module.waveformLength = 32;
         rig.module.actualFrequency = 10000;
         rig.module.sampling.requestedRate = 80000;
         rig.module.sampling.samples = 128;
@@ -1523,6 +1812,7 @@ private slots:
         rig.module.settings.averages = 1;
         rig.module.settings.allowAliasing = alias;
         rig.module.points = {{1000, 1}};
+        rig.module.waveformLength = 32;
         rig.module.actualFrequency = 1000;
         rig.module.sampling.requestedRate = 8000;
         rig.module.sampling.samples = 128;
@@ -1546,6 +1836,7 @@ private slots:
         rig.module.settings = FrequencyAnalysis::Settings{};
         rig.module.settings.averages = 1;
         rig.module.points = {{1000, 1}};
+        rig.module.waveformLength = 32;
         rig.module.actualFrequency = 1000;
         rig.module.sampling.requestedRate = 32000;
         rig.module.sampling.samples = 1024;

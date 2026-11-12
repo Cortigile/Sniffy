@@ -392,6 +392,21 @@ void DeviceMediator::parseData(QByteArray data)
     QByteArray dataHeader = data.left(4);
     QByteArray dataToPass = data.right(data.length() - 4);
 
+    if (dataHeader == Commands::SCOPE
+        && (dataToPass.left(4) == "INP_"
+            || (dataToPass.left(4) == "NACK" && frequencyAnalysis->isDiscoveringInputs()))) {
+        for (const auto &module : modules) {
+            if (auto *voltmeter = qobject_cast<Voltmeter *>(module.data()))
+                voltmeter->parseData(dataToPass);
+        }
+        frequencyAnalysis->parseInstrumentData(dataHeader, dataToPass);
+        if (frequencyAnalysis->isAvailable() && !frequencyAnalysis->isActive()
+            && resourceManager.conflicts(ResourceSet::fromModule(frequencyAnalysis))) {
+            frequencyAnalysis->setModuleStatus(ModuleStatus::LOCKED);
+        }
+        return;
+    }
+
     // The host-side analyzer owns these instruments while its resources are reserved.
     if (frequencyAnalysis->isActive()
         && (dataHeader == Commands::SCOPE || dataHeader == Commands::SIGNAL_GENERATOR)
