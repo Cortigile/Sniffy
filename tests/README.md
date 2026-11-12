@@ -1,5 +1,21 @@
 # Regression Tests
 
+## Authentication
+
+```powershell
+cmake -S sniffy -B build-tests -DSNIFFY_BUILD_AUTH_TESTS=ON
+cmake --build build-tests --target authenticator_tests
+ctest --test-dir build-tests --output-on-failure -R authenticator_tests
+```
+
+Use the application's Qt/toolchain settings and put Qt and compiler-runtime DLL
+directories on `PATH` on Windows. The tests inject completed network replies;
+they never contact the website or change saved settings. They check that both
+demo-to-paid and paid-to-demo token refreshes request a new device handshake,
+unchanged access does not cause reconnect loops, and manual login and legacy
+responses retain their behavior. The firmware remains responsible for module
+authorization; a valid login alone is not a paid license.
+
 ## Oscilloscope
 
 Configure with the same Qt/toolchain settings as the application:

@@ -162,8 +162,8 @@ void CounterWindow::setSpecification(CounterSpec *spec){
     // Hide tabs based on hardware support
     tabs->setTabVisible(0, spec->hf_max > 0);
     tabs->setTabVisible(1, spec->lf_max > 0);
-    tabs->setTabVisible(2, spec->rat_max_chan > 0);
-    tabs->setTabVisible(3, spec->lf_max > 0); // Intervals depend on LF capture (IC)
+    tabs->setTabVisible(2, spec->rat_max_chan > 0 && spec->pins.rat_ch3[0] !="-"); //dont show if no valid pin
+    tabs->setTabVisible(3, spec->lf_max > 0 && spec->pins.int_ch1[0] !="-"); // Intervals depend on LF capture (IC), dont show if no valid pin
 }
 
 void CounterWindow::configureDisplaysDynamicAttr(){

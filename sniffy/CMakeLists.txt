@@ -247,6 +247,21 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${EXTRA_LIBS}
 )
 
+option(SNIFFY_BUILD_AUTH_TESTS "Build authentication regression tests" OFF)
+if(SNIFFY_BUILD_AUTH_TESTS)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    enable_testing()
+    add_executable(authenticator_tests
+        ../tests/authenticator_test.cpp
+        auth/authenticator.cpp
+        auth/authenticator.h
+        app/customsettings.cpp
+    )
+    target_include_directories(authenticator_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(authenticator_tests PRIVATE Qt6::Widgets Qt6::Network Qt6::Test)
+    add_test(NAME authenticator_tests COMMAND authenticator_tests -o -,txt)
+endif()
+
 option(SNIFFY_BUILD_SCOPE_TESTS "Build oscilloscope regression tests" OFF)
 if(SNIFFY_BUILD_SCOPE_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)

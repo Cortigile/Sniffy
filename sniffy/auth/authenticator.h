@@ -52,6 +52,8 @@ private slots:
     void checkAuthStatus(); // Polling slot for checking auth status
 
 private:
+    friend class AuthenticatorTest;
+
     void startRequest(const QString &email, const QString &deviceName, const QString &mcuId);
     void beginManualAttempt(const QString &email);
 
