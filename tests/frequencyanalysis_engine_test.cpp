@@ -216,6 +216,81 @@ private slots:
         QVERIFY(std::abs(tone.rms - amplitude / std::sqrt(2.0)) < 0.001);
     }
 
+    void toneUncertaintyGeometry_data()
+    {
+        QTest::addColumn<double>("frequency");
+        QTest::addColumn<double>("rate");
+        QTest::addColumn<int>("samples");
+        QTest::newRow("short-off-bin") << (16.417 * 100000 / 256) << 100000.0 << 256;
+        QTest::newRow("long-off-bin") << 1234.567 << 100000.0 << 4096;
+        QTest::newRow("negative-alias") << 1000000.0 << 1010000.0 << 4096;
+        QTest::newRow("positive-alias") << 1000000.0 << 990000.0 << 4096;
+        QTest::newRow("non-power-of-two") << 1234.567 << 100000.0 << 3001;
+    }
+
+    void toneUncertaintyGeometry()
+    {
+        QFETCH(double, frequency);
+        QFETCH(double, rate);
+        QFETCH(int, samples);
+        constexpr double step = 3.3 / 4095;
+        constexpr double amplitude = 0.7;
+        for (int i = 0; i < 16; ++i) {
+            const double phase = i * 0.39;
+            Tone tone;
+            QString error;
+            QVERIFY2(extractTone(capture(samples, frequency, rate, amplitude, phase),
+                                 frequency, rate, tone, error, step), qPrintable(error));
+            const double measuredError = std::abs(tone.value - std::polar(amplitude, phase)) / amplitude;
+            QVERIFY(measuredError <= tone.dftRelativeErrorBound + 1e-10);
+            QVERIFY(tone.dftRelativeErrorBound > 0 && tone.dftRelativeErrorBound < 0.001);
+            const double expected = step * std::sqrt(3.77024644744343 / (6 * (samples - 1)));
+            QVERIFY(std::abs(tone.quantizationStdDev / expected - 1) < 0.0001);
+        }
+        Tone shortTone, longTone;
+        QString error;
+        QVERIFY(extractTone(capture(1024, 3125, 100000, 1, 0), 3125, 100000,
+                            shortTone, error, step));
+        QVERIFY(extractTone(capture(4096, 3125, 100000, 1, 0), 3125, 100000,
+                            longTone, error, step));
+        QVERIFY(std::abs(shortTone.quantizationStdDev / longTone.quantizationStdDev - 2) < 0.001);
+        for (double invalid : {-1.0, std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::infinity()}) {
+            QVERIFY(!extractTone(capture(1024, 3125, 100000, 1, 0), 3125, 100000,
+                                 shortTone, error, invalid));
+            QVERIFY(!error.isEmpty());
+        }
+    }
+
+    void quantizationMatchesWhiteNoiseScatter()
+    {
+        constexpr int samples = 512;
+        constexpr double frequency = 32.417 * 100000 / samples;
+        constexpr double step = 0.01;
+        constexpr double phase = 0.73;
+        const auto clean = capture(samples, frequency, 100000, 0.8, phase);
+        Tone baseline;
+        QString error;
+        QVERIFY(extractTone(clean, frequency, 100000, baseline, error, step));
+        std::mt19937 random(45678);
+        std::uniform_real_distribution<double> noise(-step / 2, step / 2);
+        double realSquared = 0, imaginarySquared = 0;
+        constexpr int trials = 500;
+        for (int trial = 0; trial < trials; ++trial) {
+            auto values = clean;
+            for (double &value : values)
+                value += noise(random);
+            Tone tone;
+            QVERIFY(extractTone(values, frequency, 100000, tone, error, step));
+            const auto delta = (tone.value - baseline.value) * std::polar(1.0, -phase);
+            realSquared += delta.real() * delta.real();
+            imaginarySquared += delta.imag() * delta.imag();
+        }
+        const double variance = baseline.quantizationStdDev * baseline.quantizationStdDev;
+        QVERIFY(std::abs(std::sqrt(realSquared / trials / variance) - 1) < 0.15);
+        QVERIFY(std::abs(std::sqrt(imaginarySquared / trials / variance) - 1) < 0.15);
+    }
+
     void targetedToneNotLargestPeak()
     {
         constexpr int samples = 8192;
@@ -513,6 +588,49 @@ private slots:
         QVERIFY(!estimateSweep(settings, 2000000, 8192, observed, error, parameters));
     }
 
+    void timingSupportsShortGeneratorWaveforms()
+    {
+        Settings settings;
+        settings.startFrequency = 2800000;
+        settings.stopFrequency = 4200000;
+        settings.pointsPerDecade = 1;
+        TimingParameters parameters;
+        parameters.generatorBufferBytes = 6;
+        parameters.generatorMaximumRate = 8400000;
+        parameters.generatorClock = 168000000;
+        parameters.transferBytesPerSecond = 11520;
+        TimingEstimate estimate, cached;
+        QVector<int> lengths;
+        QString error;
+        QVERIFY2(estimateSweep(settings, 2000000, 8192, estimate, error, parameters, &lengths),
+                 qPrintable(error));
+        QCOMPARE(lengths, QVector<int>({3, 2}));
+        QVERIFY2(estimateSweep(settings, 2000000, 8192, cached, error, parameters, &lengths),
+                 qPrintable(error));
+        QCOMPARE(cached.totalSeconds, estimate.totalSeconds);
+        QCOMPARE(cached.totalMaximumSeconds, estimate.totalMaximumSeconds);
+
+        settings.startFrequency = 4000000;
+        parameters.generatorBufferBytes = 4;
+        lengths.clear();
+        QVERIFY2(estimateSweep(settings, 2000000, 8192, estimate, error, parameters, &lengths),
+                 qPrintable(error));
+        QCOMPARE(lengths, QVector<int>({2, 2}));
+
+        settings.stopFrequency = 4200001;
+        lengths.clear();
+        QVERIFY(!estimateSweep(settings, 2000000, 8192, estimate, error, parameters, &lengths));
+        QVERIFY(!error.isEmpty());
+        QCOMPARE(estimate.totalSeconds, 0.0);
+
+        settings.startFrequency = 8000000;
+        settings.stopFrequency = 9000000;
+        parameters.generatorMaximumRate = 20000000;
+        lengths = {2, 2};
+        QVERIFY(!estimateSweep(settings, 2000000, 8192, estimate, error, parameters, &lengths));
+        QVERIFY(!error.isEmpty());
+    }
+
     void phaseRotatedCapturesAndPhysicalSkew()
     {
         constexpr double frequency = 1000000;
@@ -610,6 +728,62 @@ private slots:
         QVERIFY2(estimateUncertainty(result, uncertainty, error), qPrintable(error));
         QVERIFY(std::isfinite(uncertainty.gainDb) && std::isfinite(uncertainty.phaseDegrees));
         QVERIFY(uncertainty.relativeMagnitude > 1e150);
+    }
+
+    void combinedUncertaintyUsesQuantizationFloor()
+    {
+        Result result;
+        result.coherence = 0.8;
+        result.averages = 8;
+        result.dftRelativeErrorBound = 0.003;
+        QString error;
+        Uncertainty uncertainty;
+        for (double quantization : {0.01, 0.125, 0.25}) {
+            result.quantizationRelativeStdDev = quantization;
+            QVERIFY2(estimateUncertainty(result, uncertainty, error), qPrintable(error));
+            const double expected = std::hypot(std::max(0.125, quantization), 0.003 / std::sqrt(3.0));
+            QVERIFY(std::abs(uncertainty.relativeMagnitude - expected) < 1e-14);
+        }
+        for (double invalid : {-1.0, std::numeric_limits<double>::quiet_NaN(),
+                               std::numeric_limits<double>::infinity()}) {
+            result.quantizationRelativeStdDev = invalid;
+            QVERIFY(!estimateUncertainty(result, uncertainty, error));
+            QVERIFY(!error.isEmpty());
+        }
+        result.quantizationRelativeStdDev = 0;
+        result.dftRelativeErrorBound = 1;
+        QVERIFY(!estimateUncertainty(result, uncertainty, error));
+        QVERIFY(!error.isEmpty());
+    }
+
+    void averagingPropagatesUncertaintyModels()
+    {
+        Averager average;
+        const Tone reference{{1, 0}, 1 / std::sqrt(2.0), 0.01, 0.0001};
+        const Tone response{{0.5, 0}, 0.5 / std::sqrt(2.0), 0.01, 0.0002};
+        QString error;
+        Result result;
+        for (int count = 1; count <= 8; ++count) {
+            QVERIFY2(average.add(reference, response, 1000, 0, error), qPrintable(error));
+            QVERIFY2(average.result(result, error), qPrintable(error));
+            QVERIFY(std::abs(result.quantizationRelativeStdDev - 0.01 * std::sqrt(5.0 / count)) < 1e-14);
+            QVERIFY(std::abs(result.dftRelativeErrorBound - 0.0003 / 0.9999) < 1e-14);
+        }
+        Uncertainty uncertainty;
+        QVERIFY(estimateUncertainty(result, uncertainty, error));
+        QVERIFY(uncertainty.gainDb > 0);
+        QVERIFY(uncertainty.phaseDegrees > 0);
+        average.clear();
+        for (int count = 0; count < 2; ++count)
+            QVERIFY(average.add(phasor({1, 0}), phasor({1, 0}), 1000, 0, error));
+        QVERIFY(average.result(result, error));
+        QCOMPARE(result.quantizationRelativeStdDev, 0.0);
+        QCOMPARE(result.dftRelativeErrorBound, 0.0);
+        for (Tone invalid : {Tone{{1, 0}, 1, -1, 0}, Tone{{1, 0}, 1, 0, 1}}) {
+            QVERIFY(!average.add(invalid, response, 1000, 0, error));
+            QVERIFY(!error.isEmpty());
+            QCOMPARE(average.count(), 2);
+        }
     }
 
     void uncertaintyUnavailableCases()

@@ -112,8 +112,17 @@ positive and negative aliases, skew correction, and cross-spectrum averaging.
 Coherence-derived one-sigma standard errors are checked analytically, against
 seeded independent-noise scatter, and for unavailable or extreme inputs; the
 actual averaging count is checked across captures and averager resets.
+The combined band is checked against the white-quantization window-noise model,
+seeded uniform-noise scatter, isolated-tone finite-record DFT bias bounds,
+quantization/coherence floor selection without double counting, and propagation
+through averaging, plot shading, CSV and agent state.
 Planner tests cover automatic record geometry, safe captures below the planning
 period target, memory/rate limits, and transport/observed-overhead timing estimates.
+Generator tests cover two- and three-sample periods, their 90/15-degree phase shifts,
+unchanged longer-period samples, short uploads and frequency readback, the inclusive
+two-sample and 24-bit transport limits, and matching cached timing estimates.
+Per-point DAC sample counts are checked in the Data table, CSV and agent state,
+independently of ADC record length, including two- and three-sample periods.
 The offscreen module tests exercise the upload/readback/acquisition sequence,
 cancellation, malformed or clipped captures, versioned configuration persistence,
 firmware-backed pin choices and conflicts, standard widget controls, linked plot

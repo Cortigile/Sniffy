@@ -47,7 +47,7 @@ public:
     void clearResults();
     void appendResult(double requestedFrequency, double actualFrequency,
                       double programmedAmplitude, int actualRate, int samples,
-                      const FrequencyAnalysis::Result &result);
+                      int generatorSamples, const FrequencyAnalysis::Result &result);
     QJsonObject state() const;
 
 signals:
@@ -62,6 +62,7 @@ private:
         double programmedAmplitude;
         int actualRate;
         int samples;
+        int generatorSamples;
         FrequencyAnalysis::Result result;
         double unwrappedPhase;
         QString referencePin;

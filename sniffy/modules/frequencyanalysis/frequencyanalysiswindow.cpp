@@ -445,14 +445,16 @@ FrequencyAnalysisWindow::FrequencyAnalysisWindow(QWidget *parent) : QWidget(pare
     viewSettings->addWidget(m_combinedPlot);
     m_showUncertainty = new WidgetButtons(m_settingsTabs, 1, ButtonTypes::CHECKABLE);
     m_showUncertainty->setObjectName(QStringLiteral("showUncertainty"));
-    m_showUncertainty->setText(tr("Uncertainty band (\u00b1%1\u03c3)").arg(uncertaintyBandSigma));
+    m_showUncertainty->setText(tr("Uncertainty band").arg(uncertaintyBandSigma));
     m_showUncertainty->setChecked(false, 0);
     m_showUncertainty->setToolTip(tr(
-        "Approximate +/-%1 sigma random uncertainty (about 99.7% coverage for Gaussian errors), "
-        "from coherence and the actual number of independent averages. "
+        "Approximate +/-%1 sigma combined uncertainty. Uses the larger of coherence scatter "
+        "and a 12-bit white-quantization noise floor with independent samples/averages, "
+        "plus a finite-record flat-top DFT bias bound for an isolated tone. "
+        "The DFT bound is not reduced by averaging. This model does not guarantee 99.7% coverage. "
         "Requires at least two averages and positive coherence. Not a calibration or absolute accuracy bound; "
-        "the approximation is less reliable for low coherence or few averages. "
-        "Unavailable estimates and reasons are included in CSV export. "
+        "ADC nonlinearity, channel skew, harmonic aliasing and other systematic errors are excluded. "
+        "The approximation is less reliable for low coherence or few averages. "
         "Bands need adjacent valid points; wrapped phase is clipped to +/-180 degrees and split at wrap jumps.")
         .arg(uncertaintyBandSigma));
     viewSettings->addWidget(m_showUncertainty);
@@ -466,7 +468,7 @@ FrequencyAnalysisWindow::FrequencyAnalysisWindow(QWidget *parent) : QWidget(pare
     plotLayout->addWidget(m_cursorBReadout);
     plotLayout->addWidget(m_cursorDifference);
     resultTabs->addTab(plots, tr("Bode plots"));
-    m_table = new QTableWidget(0, 16, resultTabs);
+    m_table = new QTableWidget(0, 17, resultTabs);
     m_table->setObjectName(QStringLiteral("frequencyAnalysisResults"));
     m_table->setHorizontalHeaderLabels({
         tr("Requested f (Hz)"), tr("Actual f (Hz)"), tr("Drive (Vpp)"),
@@ -474,7 +476,7 @@ FrequencyAnalysisWindow::FrequencyAnalysisWindow(QWidget *parent) : QWidget(pare
         tr("Wrapped phase (\u00b0)"), tr("Unwrapped phase (\u00b0)"),
         tr("CH1 RMS (V)"), tr("CH2 RMS (V)"), tr("Coherence"),
         tr("Reference pin"), tr("Response pin"), tr("DAC pin"), tr("Observed cycles"),
-        tr("Averages")});
+        tr("Averages"), tr("DAC samples/period")});
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setAlternatingRowColors(true);
@@ -1051,7 +1053,7 @@ void FrequencyAnalysisWindow::clearResults()
 
 void FrequencyAnalysisWindow::appendResult(double requestedFrequency, double actualFrequency,
                                            double programmedAmplitude, int actualRate, int samples,
-                                           const FrequencyAnalysis::Result &result)
+                                           int generatorSamples, const FrequencyAnalysis::Result &result)
 {
     for (double value : {requestedFrequency, actualFrequency, programmedAmplitude,
                          result.gainDb, result.phaseDegrees, result.referenceRms,
@@ -1062,7 +1064,7 @@ void FrequencyAnalysisWindow::appendResult(double requestedFrequency, double act
         }
     }
     if (requestedFrequency <= 0 || actualFrequency <= 0 || programmedAmplitude <= 0
-        || actualRate <= 0 || samples <= 0 || result.referenceRms < 0
+        || actualRate <= 0 || samples <= 0 || generatorSamples < 2 || result.referenceRms < 0
         || result.responseRms < 0 || result.coherence < 0 || result.coherence > 1 || result.averages < 0) {
         setStatus(tr("Rejected an out-of-range frequency analysis result."), true);
         return;
@@ -1086,7 +1088,7 @@ void FrequencyAnalysisWindow::appendResult(double requestedFrequency, double act
         FrequencyAnalysis::estimateUncertainty(wrapped, estimate, uncertaintyReason)
             ? std::optional<FrequencyAnalysis::Uncertainty>(estimate) : std::nullopt;
     m_results.append({requestedFrequency, actualFrequency, programmedAmplitude,
-                      actualRate, samples, wrapped, unwrapped, referencePin, responsePin, dacPin,
+                      actualRate, samples, generatorSamples, wrapped, unwrapped, referencePin, responsePin, dacPin,
                       uncertainty, uncertaintyReason});
     m_gainSeries->append(actualFrequency, wrapped.gainDb);
     m_phaseSeries->append(actualFrequency, m_unwrapPhase->isChecked(0) ? unwrapped : wrapped.phaseDegrees);
@@ -1103,7 +1105,7 @@ void FrequencyAnalysisWindow::appendResult(double requestedFrequency, double act
         number(wrapped.responseRms), number(wrapped.coherence),
         referencePin, responsePin, dacPin,
         number(samples * std::abs(std::remainder(actualFrequency, double(actualRate))) / actualRate),
-        QString::number(wrapped.averages)};
+        QString::number(wrapped.averages), QString::number(generatorSamples)};
     for (int column = 0; column < values.size(); ++column) {
         auto *item = new QTableWidgetItem(values.at(column));
         item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -1386,7 +1388,8 @@ QJsonObject FrequencyAnalysisWindow::state() const
     for (const auto &measurement : m_results) {
         QJsonObject uncertainty{
             {QStringLiteral("available"), measurement.uncertainty.has_value()},
-            {QStringLiteral("standard_deviations"), uncertaintyBandSigma}
+            {QStringLiteral("standard_deviations"), uncertaintyBandSigma},
+            {QStringLiteral("model"), QStringLiteral("coherence_quantization_flattop")}
         };
         if (measurement.uncertainty) {
             uncertainty.insert(QStringLiteral("relative_magnitude_stddev"), measurement.uncertainty->relativeMagnitude);
@@ -1403,6 +1406,7 @@ QJsonObject FrequencyAnalysisWindow::state() const
             {QStringLiteral("drive_vpp"), measurement.programmedAmplitude},
             {QStringLiteral("sampling_rate_hz"), measurement.actualRate},
             {QStringLiteral("samples"), measurement.samples},
+            {QStringLiteral("generator_samples_per_period"), measurement.generatorSamples},
             {QStringLiteral("gain_db"), measurement.result.gainDb},
             {QStringLiteral("phase_degrees"), measurement.result.phaseDegrees},
             {QStringLiteral("phase_unwrapped_degrees"), measurement.unwrappedPhase},
@@ -1443,7 +1447,7 @@ QByteArray FrequencyAnalysisWindow::csvData() const
     QByteArray csv("requested_frequency_hz,actual_frequency_hz,drive_vpp,actual_sample_rate_hz,"
                    "samples,gain_db,phase_wrapped_deg,phase_unwrapped_deg,reference_rms_v,"
                    "response_rms_v,coherence,reference_pin,response_pin,dac_pin,observed_cycles,"
-                   "averages,gain_stddev_db,phase_stddev_deg,uncertainty_status\n");
+                   "averages,gain_stddev_db,phase_stddev_deg,uncertainty_status,generator_samples_per_period\n");
     for (const auto &measurement : m_results) {
         csv += QStringList{
             number(measurement.requestedFrequency), number(measurement.actualFrequency),
@@ -1459,8 +1463,9 @@ QByteArray FrequencyAnalysisWindow::csvData() const
             QString::number(measurement.result.averages),
             measurement.uncertainty ? number(measurement.uncertainty->gainDb) : QString(),
             measurement.uncertainty ? number(measurement.uncertainty->phaseDegrees) : QString(),
-            csvField(measurement.uncertainty ? QStringLiteral("approximate_random_1_sigma")
-                                             : measurement.uncertaintyReason)
+            csvField(measurement.uncertainty ? QStringLiteral("approximate_combined_1_sigma")
+                                             : measurement.uncertaintyReason),
+            QString::number(measurement.generatorSamples)
         }.join(QLatin1Char(',')).toUtf8();
         csv += '\n';
     }

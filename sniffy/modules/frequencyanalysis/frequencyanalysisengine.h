@@ -20,7 +20,7 @@ struct Settings {
     double offset = 1.65;
     int pointsPerDecade = 10;
     int averages = 4;
-    int periods = 64;
+    int periods = 128;
     int settlingMs = 100;
     Spacing frequencySpacing = Spacing::Logarithmic;
     Spacing amplitudeSpacing = Spacing::Linear;
@@ -90,6 +90,8 @@ bool estimateSweep(const Settings &, int maxRate, int maxSamples,
 struct Tone {
     std::complex<double> value;
     double rms = 0;
+    double quantizationStdDev = 0;
+    double dftRelativeErrorBound = 0;
 };
 
 // Cosine convention: v[n] = dc + Re(value * exp(i*2*pi*f*n/rate)).
@@ -97,7 +99,9 @@ struct Tone {
 // negative aliases are conjugated to preserve the physical-frequency phase.
 // Requires >=64 samples and >=16 cycles from both DC and Nyquist. Buffers need
 // not be powers of two. rms is the tone RMS, not the broadband waveform RMS.
-bool extractTone(const QVector<double> &volts, double f, double rate, Tone &, QString &error);
+// adcStep enables an independent white-quantization model; zero leaves it unknown.
+bool extractTone(const QVector<double> &volts, double f, double rate, Tone &, QString &error,
+                 double adcStep = 0);
 
 struct Result {
     double gainDb = 0;
@@ -106,6 +110,8 @@ struct Result {
     double responseRms = 0;
     double coherence = 0;
     int averages = 0;
+    double quantizationRelativeStdDev = 0;
+    double dftRelativeErrorBound = 0;
 };
 
 struct Uncertainty {
@@ -114,8 +120,9 @@ struct Uncertainty {
     double phaseDegrees = 0;
 };
 
-// Approximate H1 random standard errors (one sigma), assuming independent
-// averages. Coherence is magnitude squared; this excludes systematic errors.
+// Approximate combined standard uncertainty: the larger of coherence scatter
+// and white quantization noise, plus an isolated-tone DFT bias bound treated
+// as rectangular. Other ADC/systematic errors are not modeled.
 bool estimateUncertainty(const Result &, Uncertainty &, QString &error);
 
 // Use one instance per sweep point (clear between frequencies).
@@ -135,6 +142,8 @@ private:
     long double m_sumXX = 0;
     long double m_sumYY = 0;
     std::complex<long double> m_sumYX{0, 0};
+    double m_quantizationStdDev = 0;
+    double m_dftRelativeErrorBound = 0;
 };
 
 } // namespace FrequencyAnalysis

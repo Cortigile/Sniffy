@@ -67,7 +67,10 @@ bool tryRate(double frequency, int rate, int sampleLimit, int periods,
 bool finiteTone(const Tone &tone)
 {
     return std::isfinite(tone.value.real()) && std::isfinite(tone.value.imag())
-        && std::isfinite(tone.rms) && tone.rms >= 0;
+        && std::isfinite(tone.rms) && tone.rms >= 0
+        && std::isfinite(tone.quantizationStdDev) && tone.quantizationStdDev >= 0
+        && std::isfinite(tone.dftRelativeErrorBound)
+        && tone.dftRelativeErrorBound >= 0 && tone.dftRelativeErrorBound < 1;
 }
 
 } // namespace
@@ -274,7 +277,7 @@ bool estimateSweep(const Settings &settings, int maxRate, int maxSamples,
     }
     const bool generatorKnown = timing.generatorBufferBytes != 0
         || timing.generatorMaximumRate != 0 || timing.generatorClock != 0;
-    if (generatorKnown && (timing.generatorBufferBytes < 8 || timing.generatorMaximumRate < 4
+    if (generatorKnown && (timing.generatorBufferBytes < 4 || timing.generatorMaximumRate < 2
                            || timing.generatorClock <= 0))
         return fail(error, "Incomplete generator timing capabilities.");
     const double secondsPerByte = std::max(timing.downloadSecondsPerByte,
@@ -300,9 +303,9 @@ bool estimateSweep(const Settings &settings, int maxRate, int maxSamples,
             const int samples = cachedLengths ? waveformLengths->at(i)
                 : SignalCreator::calculateSignalLength(MemoryLength::BEST_FIT, 0,
                     std::min(timing.generatorBufferBytes, 131070), points[i].frequency,
-                    std::min(timing.generatorMaximumRate, 0x00ffffff), timing.generatorClock, 4);
-            if (samples < 4 || samples > std::min(timing.generatorBufferBytes, 131070) / 2
-                || samples * points[i].frequency > timing.generatorMaximumRate)
+                    std::min(timing.generatorMaximumRate, 0x00ffffff), timing.generatorClock, 2);
+            if (samples < 2 || samples > std::min(timing.generatorBufferBytes, 131070) / 2
+                || samples * points[i].frequency > std::min(timing.generatorMaximumRate, 0x00ffffff))
                 return fail(error, "A sweep point has no feasible sine waveform for the timing estimate.");
             if (!cachedLengths)
                 calculatedLengths.append(samples);
@@ -336,12 +339,15 @@ bool estimateSweep(const Settings &settings, int maxRate, int maxSamples,
     return true;
 }
 
-bool extractTone(const QVector<double> &volts, double f, double rate, Tone &tone, QString &error)
+bool extractTone(const QVector<double> &volts, double f, double rate, Tone &tone, QString &error,
+                 double adcStep)
 {
     tone = {};
     error.clear();
     if (!positiveFinite(f) || !positiveFinite(rate))
         return fail(error, "Tone frequency and sampling rate must be finite and positive.");
+    if (!std::isfinite(adcStep) || adcStep < 0)
+        return fail(error, "ADC quantization step must be finite and nonnegative.");
     const auto size = volts.size();
     if (size < 64)
         return fail(error, "Tone extraction requires at least 64 samples.");
@@ -365,17 +371,24 @@ bool extractTone(const QVector<double> &volts, double f, double rate, Tone &tone
     long double real = 0;
     long double imaginary = 0;
     long double coherentGain = 0;
+    long double windowPower = 0;
+    std::complex<long double> unweightedSum{0, 0}, windowSum{0, 0}, doubleFrequencySum{0, 0};
     for (decltype(volts.size()) n = 0; n < size; ++n) {
         const double windowAngle = 2 * pi * double(n) / double(size - 1);
-        const double window = 0.21557895 - 0.41663158 * std::cos(windowAngle)
+        const long double window = 0.21557895 - 0.41663158 * std::cos(windowAngle)
             + 0.277263158 * std::cos(2 * windowAngle)
             - 0.083578947 * std::cos(3 * windowAngle)
             + 0.006947368 * std::cos(4 * windowAngle);
         const double angle = 2 * pi * normalized * double(n);
+        const std::complex<long double> rotation(std::cos(angle), -std::sin(angle));
         const long double centered = static_cast<long double>(volts[n]) / scale - mean;
-        real += window * centered * std::cos(angle);
-        imaginary -= window * centered * std::sin(angle);
+        real += window * centered * rotation.real();
+        imaginary += window * centered * rotation.imag();
         coherentGain += window;
+        windowPower += window * window;
+        unweightedSum += rotation;
+        windowSum += window * rotation;
+        doubleFrequencySum += window * rotation * rotation;
     }
     // A real sinusoid has half its peak phasor at each signed frequency.
     // Dividing by sum(w), then multiplying by two, corrects coherent gain.
@@ -387,7 +400,15 @@ bool extractTone(const QVector<double> &volts, double f, double rate, Tone &tone
                                          imaginaryPeak / std::sqrt(2.0L)));
     if (!std::isfinite(phasor.real()) || !std::isfinite(phasor.imag()) || !std::isfinite(rms))
         return fail(error, "The extracted tone exceeds the finite numerical range.");
-    tone = {phasor, rms};
+    const double quantizationStdDev = double(adcStep * std::sqrt(windowPower / 6) / coherentGain);
+    // Bound the negative-frequency image and leakage introduced by mean removal.
+    const double dftBound = double(std::abs(doubleFrequencySum / coherentGain)
+        + 2 * std::abs(unweightedSum / static_cast<long double>(size))
+            * std::abs(windowSum / coherentGain));
+    const Tone extracted{phasor, rms, quantizationStdDev, dftBound};
+    if (!finiteTone(extracted))
+        return fail(error, "The tone uncertainty model exceeds its finite small-error range.");
+    tone = extracted;
     return true;
 }
 
@@ -401,9 +422,16 @@ bool estimateUncertainty(const Result &result, Uncertainty &uncertainty, QString
         return fail(error, "At least two independent averages are required.");
     if (result.coherence == 0)
         return fail(error, "Zero coherence has no finite uncertainty estimate.");
+    if (!std::isfinite(result.quantizationRelativeStdDev) || result.quantizationRelativeStdDev < 0
+        || !std::isfinite(result.dftRelativeErrorBound)
+        || result.dftRelativeErrorBound < 0 || result.dftRelativeErrorBound >= 1)
+        return fail(error, "Invalid quantization or DFT uncertainty.");
     // sqrt((1-C)/(2*N*C)), arranged to avoid overflowing 1/C near zero.
-    const double relative = std::sqrt(1 - result.coherence) / std::sqrt(result.coherence)
+    const double scatter = std::sqrt(1 - result.coherence) / std::sqrt(result.coherence)
         / std::sqrt(2.0 * result.averages);
+    // Coherence can already contain quantization noise; use a floor, not another sum.
+    const double relative = std::hypot(std::max(scatter, result.quantizationRelativeStdDev),
+                                      result.dftRelativeErrorBound / std::sqrt(3.0));
     uncertainty = {relative, 20 / std::log(10.0) * relative, 180 / pi * relative};
     return true;
 }
@@ -415,6 +443,8 @@ void Averager::clear()
     m_sumXX = 0;
     m_sumYY = 0;
     m_sumYX = {0, 0};
+    m_quantizationStdDev = 0;
+    m_dftRelativeErrorBound = 0;
 }
 
 bool Averager::add(const Tone &reference, const Tone &response, double frequency,
@@ -427,6 +457,10 @@ bool Averager::add(const Tone &reference, const Tone &response, double frequency
         return fail(error, "Frequency must be positive and finite; skew must be within +/-1 second.");
     if (reference.value == std::complex<double>{0, 0})
         return fail(error, "The reference tone has zero amplitude.");
+    const double dftBound = (reference.dftRelativeErrorBound + response.dftRelativeErrorBound)
+        / (1 - reference.dftRelativeErrorBound);
+    if (!std::isfinite(dftBound) || dftBound >= 1)
+        return fail(error, "The DFT transfer uncertainty exceeds its small-error range.");
     if (m_count == std::numeric_limits<int>::max())
         return fail(error, "Too many captures in this average.");
     const double scale = std::max({m_scale, std::abs(reference.value.real()),
@@ -452,6 +486,9 @@ bool Averager::add(const Tone &reference, const Tone &response, double frequency
     m_sumXX = xx;
     m_sumYY = yy;
     m_sumYX = yx;
+    m_quantizationStdDev = std::max({m_quantizationStdDev, reference.quantizationStdDev,
+                                   response.quantizationStdDev});
+    m_dftRelativeErrorBound = std::max(m_dftRelativeErrorBound, dftBound);
     ++m_count;
     return true;
 }
@@ -480,9 +517,14 @@ bool Averager::result(Result &result, QString &error) const
     const long double correlation = crossMagnitude / std::sqrt(m_sumXX) / std::sqrt(m_sumYY);
     calculated.coherence = m_count == 1 ? 1 : double(std::clamp(correlation * correlation, 0.0L, 1.0L));
     calculated.averages = m_count;
+    calculated.quantizationRelativeStdDev = std::hypot(
+        m_quantizationStdDev / calculated.referenceRms,
+        m_quantizationStdDev / calculated.responseRms) / std::sqrt(2.0 * m_count);
+    calculated.dftRelativeErrorBound = m_dftRelativeErrorBound;
     if (!std::isfinite(calculated.gainDb) || !std::isfinite(calculated.phaseDegrees)
         || !std::isfinite(calculated.referenceRms) || !std::isfinite(calculated.responseRms)
-        || !std::isfinite(calculated.coherence))
+        || !std::isfinite(calculated.coherence)
+        || !std::isfinite(calculated.quantizationRelativeStdDev))
         return fail(error, "The averaged result exceeds the finite numerical range.");
     result = calculated;
     return true;
