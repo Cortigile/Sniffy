@@ -386,7 +386,14 @@ void FirmwareManager::onFirmwareDownloadFinished(QNetworkReply *reply)
     const QString filename = extractReplyFilename(reply);
     if (filename.compare(expectedName, Qt::CaseInsensitive) != 0)
     {
+        // Server errors are sent as JSON without Content-Disposition, so the filename falls back to the script name.
+        const QString mismatchServerError = extractJsonErrorMessage(reply->peek(reply->bytesAvailable()));
         reply->deleteLater();
+        if (!mismatchServerError.isEmpty())
+        {
+            failOperation("Server reply: " + mismatchServerError);
+            return;
+        }
         failOperation(QStringLiteral("Error: Downloaded file (%1) does not match MCU UID.").arg(filename));
         return;
     }
