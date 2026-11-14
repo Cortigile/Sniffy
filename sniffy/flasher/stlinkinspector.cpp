@@ -71,11 +71,16 @@ QString StLinkInspector::getDetectedMcu(stlink_t* stlink)
             flashChar = '8';
             break;  // F303x6/x8 (Small Density)
         case 0x411: // <-- FIXED (Was 0x413)
-            family = "F405";
-            break;  // F405/407/415/417 High Performance
+            family = "F205";
+            break;  // F205/207/215/217 High Performance
         case 0x413: // <-- ADDED FOR ACCURACY
+            family = "F405";
+            break; // F405 / F407 Access Line
+        case 0x433: // STM32F401xD/xE (Nucleo-F401RE)
             family = "F401";
-            break; // F401 Access Line
+            packageChar = 'R';
+            flashChar = 'E';
+            break;
         case 0x419:
             family = "F427";
             break; // F427/437/429/439
@@ -85,7 +90,7 @@ QString StLinkInspector::getDetectedMcu(stlink_t* stlink)
             flashChar = 'E';
             break; // F446 Retarget
         case 0x431:
-            family = "F411";
+            family = "F411"; // STM32F411xD/xE (Nucleo-F411RE)
             packageChar = 'R';
             flashChar = 'E';
             break;

@@ -9,6 +9,7 @@
 #include <QtSerialPort/QSerialPortInfo>
 #include <QTextStream>
 #include <algorithm>
+#include <cstring>
 
 #include "stlink.h"
 extern "C"
@@ -419,9 +420,16 @@ bool StLinkConnector::loadDeviceParamsFallback()
                 uint32_t flash_size_kb = 0;
                 if (p_flash_size_reg != 0)
                 {
-                    if (!stlink_read_mem32(m_stlink, p_flash_size_reg, 4))
+                    const uint32_t alignedReg = p_flash_size_reg & ~3u;
+                    if (!stlink_read_mem32(m_stlink, alignedReg, 4))
                     {
-                        const uint32_t val = *(uint32_t *)m_stlink->q_buf;
+                        uint32_t val = 0;
+                        std::memcpy(&val, m_stlink->q_buf, sizeof(val));
+                        // Size register is 16-bit and may sit in the upper half of the aligned word.
+                        if ((p_flash_size_reg & 2u) != 0)
+                        {
+                            val >>= 16;
+                        }
                         flash_size_kb = val & 0xFFFF;
                     }
                 }

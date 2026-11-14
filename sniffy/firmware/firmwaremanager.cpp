@@ -1,6 +1,7 @@
 #include "firmwaremanager.h"
 #include "graphics/graphics.h"
 #include "app/customsettings.h"
+#include "updates/storepackage.h"
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -534,6 +535,10 @@ bool FirmwareManager::isManifestCompatible(const FirmwareCompatibility::ReleaseM
     {
         errorMessage = QStringLiteral("Latest firmware requires Sniffy %1 or newer.")
                            .arg(manifest.minDesktopVersion);
+        if (StorePackage::isPackagedApp())
+        {
+            errorMessage += QStringLiteral(" Update Sniffy in Microsoft Store.");
+        }
     }
     else if (!FirmwareCompatibility::isSupportedProtocolVersion(manifest.protocolVersion))
     {
@@ -595,6 +600,8 @@ void FirmwareManager::requestLatestFirmwareManifest(const QString &uidHex, const
     QUrl url(QStringLiteral("https://sniffylab.com/scripts/sniffy_fw_latest.php"));
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("mcu"), mcu);
+    query.addQueryItem(QStringLiteral("app_version"), FirmwareCompatibility::applicationVersionText());
+    query.addQueryItem(QStringLiteral("protocol"), QString::number(FirmwareCompatibility::supportedProtocolVersion()));
     url.setQuery(query);
 
     QNetworkRequest request(url);
@@ -617,6 +624,9 @@ void FirmwareManager::requestFirmwareBinary(const QString &uidHex, const QString
     query.addQueryItem(QStringLiteral("session_ID"), sessionId);
     query.addQueryItem(QStringLiteral("MCU_UID"), uidHex);
     query.addQueryItem(QStringLiteral("MCU"), mcu);
+    query.addQueryItem(QStringLiteral("app_version"), FirmwareCompatibility::applicationVersionText());
+    query.addQueryItem(QStringLiteral("protocol"), QString::number(FirmwareCompatibility::supportedProtocolVersion()));
+    query.addQueryItem(QStringLiteral("fw_version"), m_pendingManifest.firmwareVersion);
     url.setQuery(query);
 
     QNetworkRequest request(url);
