@@ -86,7 +86,11 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.2 REQUIRED COMPONENTS
+set(SNIFFY_MIN_QT_VERSION 6.2)
+if(APPLE)
+    set(SNIFFY_MIN_QT_VERSION 6.7) # DEPLOY_TOOL_OPTIONS in qt_generate_deploy_app_script
+endif()
+find_package(Qt6 ${SNIFFY_MIN_QT_VERSION} REQUIRED COMPONENTS
     Core
     Gui
     Widgets
@@ -212,9 +216,9 @@ if(WIN32)
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/config/chips"
     )
 
-elseif(UNIX AND NOT APPLE)
+elseif(UNIX)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
+    pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0)
     if(DEFINED ENV{SNIFFY_STLINK_LIBRARY})
         set(STLINK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/stlink/include")
         set(STLINK_LIB "$ENV{SNIFFY_STLINK_LIBRARY}")
@@ -229,10 +233,9 @@ elseif(UNIX AND NOT APPLE)
     message(STATUS "Found libstlink: ${STLINK_LIB}")
     message(STATUS "Found stlink headers: ${STLINK_INCLUDE_DIR}")
     target_include_directories(${PROJECT_NAME} PRIVATE
-        ${LIBUSB_INCLUDE_DIRS}
         ${STLINK_INCLUDE_DIR}
     )
-    set(EXTRA_LIBS ${STLINK_LIB} ${LIBUSB_LIBRARIES})
+    set(EXTRA_LIBS ${STLINK_LIB} PkgConfig::LIBUSB)
 endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -415,6 +418,23 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
+if(APPLE)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Sniffy"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.sniffy.sniffy"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${SNIFFY_DESKTOP_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${SNIFFY_DESKTOP_VERSION}"
+    )
+    file(GLOB SNIFFY_CHIP_FILES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/libs/stlink/config/chips/*.chip"
+    )
+    set_source_files_properties(${SNIFFY_CHIP_FILES} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources/chips"
+    )
+    target_sources(${PROJECT_NAME} PRIVATE ${SNIFFY_CHIP_FILES})
+endif()
+
 # Enable unity build (can significantly reduce compile time)
 if(SNIFFY_ENABLE_UNITY)
     # On MinGW/GNU, very large unity objects may hit 'too many sections'. Use a smaller batch.
@@ -474,7 +494,7 @@ endif()
 # --- Installation & Deployment ---
 include(GNUInstallDirs)
 
-if(WIN32)
+if(WIN32 OR APPLE)
     set(SNIFFY_LEGAL_INSTALL_DIR "licenses")
 else()
     set(SNIFFY_LEGAL_INSTALL_DIR "${CMAKE_INSTALL_DOCDIR}")
@@ -495,8 +515,17 @@ install(DIRECTORY
 # 1. Install the main executable
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
-    BUNDLE DESTINATION bin
+    BUNDLE DESTINATION .
 )
+
+if(APPLE)
+    qt_generate_deploy_app_script(
+        TARGET ${PROJECT_NAME}
+        OUTPUT_SCRIPT SNIFFY_DEPLOY_SCRIPT
+        DEPLOY_TOOL_OPTIONS "-codesign=-"
+    )
+    install(SCRIPT "${SNIFFY_DEPLOY_SCRIPT}")
+endif()
 
 if(UNIX AND NOT APPLE)
     configure_file(
@@ -616,7 +645,10 @@ if(WIN32)
     set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/graphics/logo.ico")
     set(CPACK_WIX_PROGRAM_MENU_FOLDER "Sniffy")
 
-elseif(UNIX AND NOT APPLE)
+elseif(APPLE)
+    set(CPACK_GENERATOR "DragNDrop")
+    set(CPACK_DMG_VOLUME_NAME "Sniffy")
+elseif(UNIX)
     set(CPACK_GENERATOR "DEB")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Sniffy Team")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON) # Auto-detect dependencies

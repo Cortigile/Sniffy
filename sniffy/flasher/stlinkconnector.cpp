@@ -102,6 +102,9 @@ QString resolveChipsDir()
 
     const QString appDir = QCoreApplication::applicationDirPath();
     const QStringList candidates = {
+#ifdef Q_OS_MACOS
+        QDir(appDir).filePath("../Resources/chips"),
+#endif
         QDir(appDir).filePath("config/chips"),
         QDir(appDir).filePath("../share/sniffy/chips"),
         QStringLiteral("/usr/share/sniffy/chips"),
