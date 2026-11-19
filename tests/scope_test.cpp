@@ -10,6 +10,7 @@
 #include "gui/widgetlabelarea.h"
 #include <QLabel>
 #include <cmath>
+#include "modules/scope/fftengine.h"
 #include "modules/scope/scope.h"
 
 class ScopeTest : public QObject
@@ -64,6 +65,32 @@ private slots:
     void initTestCase()
     {
         Graphics::setTheme(0);
+    }
+
+    void fftSpectrumMatchesDft()
+    {
+        FFTengine engine;
+        QSignalSpy calculated(&engine, &FFTengine::fftCalculated);
+        QVector<QPointF> input;
+        const float samples[] = {1, 2, 3, 4, 0, 0, 0, 0};
+        for (int i = 0; i < 8; ++i)
+            input.append(QPointF(i, samples[i]));
+
+        engine.calculate(input, FFTWindow::rectangular, FFTType::spectrum, 8, false, 8);
+        QTRY_COMPARE_WITH_TIMEOUT(calculated.count(), 1, 5000);
+        const auto output = engine.getProcessedData();
+        QCOMPARE(output.size(), 5);
+        for (int k = 0; k <= 4; ++k) {
+            double real = 0;
+            double imag = 0;
+            for (int n = 0; n < 8; ++n) {
+                const double angle = 2 * std::acos(-1.0) * k * n / 8;
+                real += samples[n] * std::cos(angle);
+                imag += samples[n] * std::sin(angle);
+            }
+            QCOMPARE(output[k].x(), double(k));
+            QVERIFY(std::abs(output[k].y() - std::hypot(real, imag) / 8) < 1e-5);
+        }
     }
 
     void boundedRawHistory()

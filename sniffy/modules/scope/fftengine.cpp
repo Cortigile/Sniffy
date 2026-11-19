@@ -184,7 +184,7 @@ QVector<std::complex<float>> FFTengine::fft(QVector<std::complex<float>> x) {
     QVector<std::complex<float>> X;
     X.resize(N);
     for (int k = 0; k < N / 2; k++) {
-        std::complex<float> Wi = std::pow(Wn, k);
+        std::complex<float> Wi(std::pow(Wn, k));
         X[k] = Xe[k] + Wi * Xo[k];
         X[k + N / 2] = Xe[k] - Wi * Xo[k];
     }
@@ -234,5 +234,4 @@ int FFTengine::nextPow2(int number) {
     while (p < number && p > 0) p <<= 1;
     return p > 0 ? p : number; // fallback in pathological overflow case
 }
-
 
