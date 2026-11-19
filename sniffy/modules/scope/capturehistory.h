@@ -8,6 +8,12 @@
 #include <deque>
 #include <optional>
 
+struct ScopeVoltageRange
+{
+    int minimumMv;
+    int maximumMv;
+};
+
 struct ScopeCapture
 {
     QVector<QVector<QPointF>> channels;
@@ -21,7 +27,8 @@ struct ScopeCapture
     int triggerLevel = 0;
 
     static std::optional<ScopeCapture> decode(const QByteArray &data, float pretrigger,
-                                               QString &error);
+                                               QString &error,
+                                               std::optional<ScopeVoltageRange> voltageRange = std::nullopt);
     bool compatibleWith(const ScopeCapture &other) const;
 };
 

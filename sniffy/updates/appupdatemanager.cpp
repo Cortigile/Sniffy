@@ -22,6 +22,7 @@
 #include <QVersionNumber>
 
 #include "firmware/firmwarecompatibility.h"
+#include "storepackage.h"
 
 namespace {
 
@@ -76,6 +77,13 @@ QString AppUpdateManager::availableVersion() const
 
 void AppUpdateManager::checkForUpdates(bool manual)
 {
+    if (StorePackage::isPackagedApp()) {
+        if (manual) {
+            emit updateStatusTextChanged(QStringLiteral("Updates are managed by Microsoft Store."));
+        }
+        return;
+    }
+
     m_manualCheckPending = m_manualCheckPending || manual;
 
     QUrl url(QString::fromLatin1(kUpdateEndpoint));
@@ -100,6 +108,11 @@ void AppUpdateManager::checkForUpdates(bool manual)
 
 void AppUpdateManager::installAvailableUpdate()
 {
+    if (StorePackage::isPackagedApp()) {
+        emit popupMessageRequested(QStringLiteral("Updates are managed by Microsoft Store."));
+        return;
+    }
+
     if (!m_updateAvailable || !m_availableRelease.isValid) {
         emit popupMessageRequested(QStringLiteral("No newer desktop update is available."));
         return;

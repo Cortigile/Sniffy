@@ -1,4 +1,7 @@
 #include <QtTest>
+#include "gui/widgettextinput.h"
+#include "gui/widgetlabel.h"
+#include <QContextMenuEvent>
 #include <QIODevice>
 #include <QSlider>
 #include <QStyleOptionSlider>
@@ -72,6 +75,36 @@ private slots:
         QCOMPARE(history.at(0).channels[0][0].y(), 12.0);
         QCOMPARE(history.at(127).channels[0][0].y(), 139.0);
         QCOMPARE(history.liveData(), history.at(127).channels);
+    }
+
+    void dockTitleBarDoesNotOpenModuleMenu()
+    {
+        class PopupTrackingWindow : public QMainWindow
+        {
+        public:
+            QMenu *createPopupMenu() override
+            {
+                ++popupRequests;
+                return nullptr;
+            }
+            int popupRequests = 0;
+        } window;
+
+        ModuleDockWidget dock(&window, "Scope");
+        window.addDockWidget(Qt::RightDockWidgetArea, &dock);
+        window.show();
+        dock.show();
+        QApplication::processEvents();
+
+        auto *title = dock.titleBarWidget();
+        auto *label = title->findChild<QLabel *>();
+        QVERIFY(label);
+        for (auto *target : {title, static_cast<QWidget *>(label)}) {
+            const QPoint position = target->rect().center();
+            QContextMenuEvent event(QContextMenuEvent::Mouse, position, target->mapToGlobal(position));
+            QApplication::sendEvent(target, &event);
+        }
+        QCOMPARE(window.popupRequests, 0);
     }
 
     void signalSliderBackgroundFits()
@@ -305,7 +338,13 @@ private slots:
     {
         ScopeConfig config;
         ScopeWindow window(&config);
-        auto *toggle = window.findChild<WidgetSwitch *>();
+        WidgetSwitch *toggle = nullptr;
+        for (auto *candidate : window.findChildren<WidgetSwitch *>()) {
+            if (candidate->accessibleName() == "Averaging") {
+                toggle = candidate;
+                break;
+            }
+        }
         auto *slider = window.findChild<QSlider *>("scopeAverageWindow");
         QVERIFY(toggle);
         QVERIFY(slider);
@@ -480,6 +519,86 @@ private slots:
         QVERIFY(!ScopeCapture::decode(invalid, 50, error));
     }
 
+    void decodeCustomVoltageRange()
+    {
+        const ScopeVoltageRange range{-2500, 7500};
+        QString error;
+        for (const int resolution : {8, 12}) {
+            const int fullScale = (1 << resolution) - 1;
+            const auto low = ScopeCapture::decode(frame(0, 1000, resolution), 50, error, range);
+            const auto high = ScopeCapture::decode(frame(fullScale, 1000, resolution), 50, error, range);
+            QVERIFY2(low && high, qPrintable(error));
+            QCOMPARE(low->rangeMin, -2500);
+            QCOMPARE(high->rangeMax, 7500);
+            QCOMPARE(low->channels[0][0], QPointF(-0.002, -2.5));
+            QCOMPARE(high->channels[1][0], QPointF(-0.002, 7.5));
+        }
+        QByteArray mismatched = frame(2048);
+        mismatched[28 + 16] = 0; // Change the second channel's firmware Vmax.
+        QVERIFY(!ScopeCapture::decode(mismatched, 50, error, range));
+        QVERIFY(!ScopeCapture::decode(frame(2048), 50, error, ScopeVoltageRange{1000, 1000}));
+    }
+
+    void measurementsWithCustomVoltageRange_data()
+    {
+        QTest::addColumn<int>("lowerCode");
+        QTest::addColumn<int>("upperCode");
+        QTest::addColumn<double>("minimum");
+        QTest::addColumn<double>("maximum");
+        QTest::newRow("negative") << 0 << 17 << -5.0 << -4.0;
+        QTest::newRow("crossing-zero") << 0 << 255 << -5.0 << 10.0;
+        QTest::newRow("positive") << 153 << 170 << 4.0 << 5.0;
+        QTest::newRow("negative-dc") << 0 << 0 << -5.0 << -5.0;
+    }
+
+    void measurementsWithCustomVoltageRange()
+    {
+        QFETCH(int, lowerCode);
+        QFETCH(int, upperCode);
+        QFETCH(double, minimum);
+        QFETCH(double, maximum);
+        constexpr int rate = 1000;
+        const ScopeVoltageRange range{-5000, 10000};
+        QString error;
+        const auto low = ScopeCapture::decode(frame(lowerCode, rate, 8, 1), 0, error, range);
+        const auto high = ScopeCapture::decode(frame(upperCode, rate, 8, 1), 0, error, range);
+        QVERIFY2(low && high, qPrintable(error));
+        QVector<QPointF> samples;
+        for (int i = 0; i < 1000; ++i)
+            samples.append(QPointF(qreal(i) / rate, (i % 100 < 50 ? low : high)->channels[0][0].y()));
+
+        Measurement min(MeasurementType::MIN, 0), max(MeasurementType::MAX, 0);
+        Measurement pkpk(MeasurementType::PKPK, 0), mean(MeasurementType::MEAN, 0);
+        Measurement rms(MeasurementType::RMS, 0), acRms(MeasurementType::RMS_AC, 0);
+        Measurement frequency(MeasurementType::FREQUENCY, 0), period(MeasurementType::PERIOD, 0);
+        Measurement duty(MeasurementType::DUTY, 0), lowDuty(MeasurementType::LOW, 0);
+        Measurement highDuty(MeasurementType::HIGH, 0);
+        MeasCalculations calculator;
+        QSignalSpy result(&calculator, &MeasCalculations::measCalculated);
+        calculator.calculate({samples}, {&min, &max, &pkpk, &mean, &rms, &acRms,
+                                         &frequency, &period, &duty, &lowDuty, &highDuty}, rate);
+        QTRY_COMPARE(result.size(), 1);
+        QCOMPARE(min.getValue(), minimum);
+        QCOMPARE(max.getValue(), maximum);
+        QCOMPARE(pkpk.getValue(), maximum - minimum);
+        QCOMPARE(pkpk.getValueString(), LabelFormator::formatOutout(maximum - minimum, "V"));
+        QCOMPARE(mean.getValue(), (maximum + minimum) / 2);
+        QCOMPARE(rms.getValue(), std::sqrt((maximum * maximum + minimum * minimum) / 2));
+        QVERIFY(qAbs(acRms.getValue() - (maximum - minimum) / 2) < 1e-12);
+        if (minimum == maximum) {
+            for (const auto *measurement : {&frequency, &period, &duty, &lowDuty, &highDuty}) {
+                QVERIFY(measurement->getValueString().startsWith("N/A"));
+                QVERIFY(qIsInf(measurement->getValue()));
+            }
+        } else {
+            QVERIFY(qAbs(frequency.getValue() - 10) < 0.1);
+            QVERIFY(qAbs(period.getValue() - 0.1) < 0.001);
+            QVERIFY(qAbs(duty.getValue() - 50) < 2);
+            QCOMPARE(highDuty.getValue(), duty.getValue());
+            QCOMPARE(lowDuty.getValue() + highDuty.getValue(), 100.0);
+        }
+    }
+
     void defaultLiveAcquisition()
     {
         Comms communication;
@@ -522,12 +641,87 @@ private slots:
         auto *historyStatus = module.getWidget()->findChild<QLabel *>("scopeTopHistoryStatus");
         QVERIFY(historyStatus);
         QCOMPARE(historyStatus->text(), QString("History: 3/3"));
+
+        auto *vmin = module.getWidget()->findChild<WidgetTextInput *>("scopeVoltageMin");
+        auto *vmax = module.getWidget()->findChild<WidgetTextInput *>("scopeVoltageMax");
+        WidgetSwitch *rangeMode = nullptr;
+        for (auto *candidate : module.getWidget()->findChildren<WidgetSwitch *>()) {
+            if (candidate->accessibleName() == "Voltage range") {
+                rangeMode = candidate;
+                break;
+            }
+        }
+        auto *rangeError = module.getWidget()->findChild<WidgetLabel *>("scopeVoltageRangeError");
+        QVERIFY(rangeMode && rangeError);
+        auto *custom = rangeMode->findChild<QPushButton *>("pushButton_right");
+        auto *firmware = rangeMode->findChild<QPushButton *>("pushButton_left");
+        auto *level = module.getWidget()->findChild<WidgetDialRange *>("TriggerValue");
+        auto *cursor = module.getWidget()->findChild<WidgetDialRange *>("verCurA");
+        auto *shift = module.getWidget()->findChild<WidgetDialRange *>("VerticalShift");
+        QVERIFY(vmin && vmax && custom && firmware && level && cursor && shift);
+        QVERIFY(rangeMode->isCheckedLeft());
+        QVERIFY(rangeError->isHidden());
+        vmin->setText("invalid");
+        custom->click();
+        QVERIFY(rangeMode->isCheckedLeft());
+        QVERIFY(!rangeError->isHidden());
+        module.setAverageWindow(2);
+        QCOMPARE(module.history.averageCount(), 2);
+        vmin->setText("-2500m");
+        vmax->setText("7.5");
+        writes.clear();
+        custom->click();
+        QVERIFY(rangeMode->isCheckedRight());
+        QVERIFY(rangeError->isHidden());
+        module.parseData(frame(2048));
+        QCOMPARE(writes.size(), 1);
+        QCOMPARE(writes.first().first().toByteArray(), nextCommand);
+        QCOMPARE(module.config->rangeMin, -2500);
+        QCOMPARE(module.config->rangeMax, 7500);
+        QCOMPARE(module.history.averageCount(), 1);
+        QVERIFY(qAbs(module.scopeData[1][0].y() - (10 * 2048 / 4095.0 - 2.5)) < 1e-12);
+        QCOMPARE(level->getRealValue(), 2.5f);
+        QCOMPARE(cursor->getRangeMin(), -2.5f);
+        QCOMPARE(cursor->getRangeMax(), 7.5f);
+        QCOMPARE(shift->getRangeMin(), -10.0f);
+        QCOMPARE(shift->getRangeMax(), 20.0f);
+        shift->setRealValue(15, false);
+        module.config->channelOffset[1] = -8;
+        level->setRealValue(0, false);
+        QCOMPARE(module.config->triggerLevelPercent, 25.0f);
+
+        for (const QString &invalid : {QStringLiteral("7.5"), QStringLiteral("invalid"), QStringLiteral("-1001")}) {
+            vmin->setText(invalid);
+            vmin->processInput();
+            QVERIFY(rangeMode->isCheckedRight());
+            QVERIFY(!rangeError->isHidden());
+        }
+        module.parseData(frame(0));
+        QCOMPARE(module.scopeData[0][0].y(), -2.5);
+        vmin->setText("-3");
+        vmin->processInput();
+        QVERIFY(rangeError->isHidden());
+        const auto editedRange = module.scpWindow->voltageRange();
+        QVERIFY(editedRange);
+        QCOMPARE(editedRange->minimumMv, -3000);
+        firmware->click();
+        QVERIFY(rangeMode->isCheckedLeft());
+        module.parseData(frame(4095));
+        QCOMPARE(module.config->rangeMax, 3300);
+        QCOMPARE(module.scopeData[0][0].y(), 3.3);
+        QCOMPARE(shift->getRangeMin(), -3.3f);
+        QCOMPARE(shift->getRangeMax(), 6.6f);
+        QCOMPARE(shift->getRealValue(), 6.6f);
+        QCOMPARE(module.config->channelOffset[0], 6.6f);
+        QCOMPARE(module.config->channelOffset[1], -3.3f);
+        QCOMPARE(module.history.at(3).rangeMax, 7500);
+        QCOMPARE(module.history.at(0).rangeMax, 3300);
         module.updateTriggerMode(ScopeTriggerMode::TRIG_STOP);
-        QCOMPARE(historyStatus->text(), QString("3/3 (stopped)"));
+        QCOMPARE(historyStatus->text(), QString("6/6 (stopped)"));
         module.updateTriggerMode(ScopeTriggerMode::TRIG_AUTO);
-        QCOMPARE(historyStatus->text(), QString("History: 3/3"));
+        QCOMPARE(historyStatus->text(), QString("History: 6/6"));
         module.stopModule();
-        QCOMPARE(historyStatus->text(), QString("3/3 (stopped)"));
+        QCOMPARE(historyStatus->text(), QString("6/6 (stopped)"));
         delete module.scpWindow;
         module.scpWindow = nullptr;
     }

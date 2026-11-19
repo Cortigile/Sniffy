@@ -195,6 +195,7 @@ Stav LOCK se typicky týká sdílených prostředků, například časovačů, A
 ### Okna modulů
 
 Každý modul se otevírá v novém dokovatelném okně. Rozvržení si tak můžete upravit uvnitř hlavního okna, nebo si jednotlivé moduly odpojit jako samostatná okna. Dokování a oddokování funguje stejně jako u běžných desktopových aplikací ve Windows, včetně ovládání přes pravou horní část záhlaví okna.
+Pravé kliknutí na záhlaví modulu neotevírá nabídku. Moduly otevírejte z levého panelu.
 
 ![Rozvržení s více dokovanými okny modulů uvnitř hlavního okna](assets/images/dock_windows.png)
 
@@ -522,6 +523,10 @@ Záložka Meas přidává měření nad daty. K dispozici jsou alespoň tyto vel
 - Phase,
 - Clear all.
 
+Peak-to-peak je rozdíl mezi nejvyšším a nejnižším vzorkem záznamu, i když je
+celý průběh pod nulou. Frekvence, perioda a střída zobrazí **N/A**, pokud
+v záznamu není rozpoznán úplný cyklus.
+
 ### 10.3 Záložka Cursors
 
 Umožňuje pracovat s kurzory v časové a amplitudové oblasti. K dispozici jsou:
@@ -561,6 +566,18 @@ V Advanced části je možné nastavovat:
 - vlastní data length,
 - pracovní režim včetně XY zobrazení,
 - volbu os X a Y v XY módu.
+
+#### Vlastní napěťový rozsah
+
+V sekci **Voltage range** zadejte **Vmin** a **Vmax** ve voltech (s krokem 1 mV)
+a zvolte **Custom**. Změny v režimu Custom potvrďte Enterem nebo opuštěním pole.
+Od další akvizice bude nejnižší kód ADC odpovídat Vmin
+a nejvyšší Vmax na všech kanálech. Přepočtené hodnoty používá graf, měření,
+matematika, FFT i kurzory. Dříve uložené akvizice si ponechají původní rozsah.
+Volba **Firmware** vrátí použití rozsahu odesílaného deskou.
+Svislý **Shift** v záložce Set má meze −1× až +2× šířka rozsahu (`Vmax − Vmin`).
+Při zúžení rozsahu se případný posun mimo nové meze omezí na nejbližší mez.
+Aktivace vlastního rozsahu se neukládá a nemění fyzický rozsah ani povolené napětí na vstupu ADC.
 
 #### Historie akvizic a průměrování signálu
 

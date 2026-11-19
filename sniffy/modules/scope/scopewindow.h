@@ -79,6 +79,8 @@ public:
     void setRealSamplingRateAndLlength(int smpl, int len);
     void setNumChannels(int channels);
     int enabledChannelMask() const;
+    std::optional<ScopeVoltageRange> voltageRange() const;
+    void setLiveVoltageRange(ScopeVoltageRange range);
 
     void updateMeasurement(QList<Measurement*> m);
     void updateMath(QVector<QPointF> mathTrace);
@@ -195,6 +197,7 @@ private:
     QVector<QVector<QPointF>> ChartData;
     QVector<QPointF> ChartMathData;
     ScopeCapture displayedCapture;
+    ScopeVoltageRange liveVoltageRange{0, 3300};
     bool historyBrowsing = false;
     qreal captureTimeMin = -0.01;
     qreal captureTimeMax = 0.01;

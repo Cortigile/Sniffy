@@ -1,5 +1,6 @@
 #include "settingsdialog.h"
 #include "ui_settingsdialog.h"
+#include "updates/storepackage.h"
 #include <QButtonGroup>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -282,6 +283,11 @@ SettingsDialog::SettingsDialog(Authenticator *auth, QWidget *parent) : QDialog(p
     buttonsCheckUpdates = new WidgetButtons(aboutPage, 1, ButtonTypes::NORMAL, "Application updates");
     buttonsCheckUpdates->setText("Check for updates", 0);
     aboutLayout->addWidget(buttonsCheckUpdates);
+    if (StorePackage::isPackagedApp())
+    {
+        buttonsCheckUpdates->setVisible(false);
+        labelUpdateStatus->setValue("Managed by Microsoft Store");
+    }
 
     WidgetSeparator *sepLegal = new WidgetSeparator(aboutPage, "Legal");
     aboutLayout->addWidget(sepLegal);

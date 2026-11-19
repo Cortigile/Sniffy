@@ -5,6 +5,7 @@
 #include <QVBoxLayout>
 #include <QSlider>
 
+#include "capturehistory.h"
 #include "gui/widgetseparator.h"
 #include "gui/widgetdial.h"
 #include "gui/widgetdialrange.h"
@@ -17,6 +18,7 @@ class PanelAdvanced  : public QObject
 {
 public:
     PanelAdvanced(QVBoxLayout *destination, QWidget *parent = nullptr);
+    std::optional<ScopeVoltageRange> voltageRange() const { return customVoltageRange; }
 
     WidgetButtons *resolutionButtons;
     WidgetButtons *modeButtons;
@@ -32,6 +34,9 @@ public:
     WidgetLabel *averageWindowLabel;
     QSlider *averageWindow;
     WidgetLabel *averageStatus;
+
+private:
+    std::optional<ScopeVoltageRange> customVoltageRange;
 };
 
 #endif // PANELADVANCED_H

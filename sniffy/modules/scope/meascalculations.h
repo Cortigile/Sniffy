@@ -52,8 +52,8 @@ private:
     bool restart;
     bool abort;
 
-    void calculateTime(QVector<QPointF> data, qint32 channel, qint32 sampling);
-    void calculateVolt(QVector<QPointF> data, qint32 channel);
+    void calculateTime(const QVector<QPointF> &data, qint32 channel, qint32 sampling);
+    void calculateVolt(const QVector<QPointF> &data, qint32 channel);
 
 };
 
