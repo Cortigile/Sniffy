@@ -602,8 +602,11 @@ set(CPACK_PACKAGE_VENDOR "Sniffy")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Sniffy Interface for Nucleo Boards")
 set(CPACK_PACKAGE_CONTACT "support@sniffy.com")
 
-# License File (GPLv3)
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt")
+# A custom CPack license can require interactive acceptance when mounting a DMG.
+# On macOS, ship the license as an installed file instead.
+if(NOT APPLE)
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt")
+endif()
 
 set(CPACK_PACKAGE_VERSION_MAJOR "${SNIFFY_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${SNIFFY_VERSION_MINOR}")

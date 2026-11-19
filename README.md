@@ -36,7 +36,7 @@ Jump to official project website [sniffylab.com](https://sniffylab.com) for regi
 
 ### macOS (Apple Silicon)
 
-Download the `.dmg` from [Releases](https://github.com/Cortigile/sniffy/releases), open it, and drag `sniffy.app` to Applications. The DMG includes Qt, libusb, and the ST-Link chip definitions. The current build is arm64 only and is not Developer ID signed or notarized, so macOS Gatekeeper may block the first launch.
+Download the `.dmg` from [Releases](https://github.com/Cortigile/sniffy/releases), open it, and drag `sniffy.app` to Applications. The DMG includes Qt, libusb, and the ST-Link chip definitions. License files are in the `licenses` folder on the disk image; mounting it does not require accepting a license dialog. The current build is arm64 only and is not Developer ID signed or notarized, so macOS Gatekeeper may block the first launch.
 
 ### Linux (Ubuntu/Debian)
 

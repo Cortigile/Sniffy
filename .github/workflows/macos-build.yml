@@ -62,9 +62,10 @@ jobs:
           set -euo pipefail
           dmg=(build/*.dmg)
           mount_point="$(mktemp -d)"
-          hdiutil attach "${dmg[0]}" -mountpoint "$mount_point" -readonly -nobrowse
+          hdiutil attach "${dmg[0]}" -mountpoint "$mount_point" -readonly -nobrowse < /dev/null
           trap 'hdiutil detach "$mount_point"; rmdir "$mount_point"' EXIT
 
+          test -s "$mount_point/licenses/LICENSE.txt"
           app="$mount_point/sniffy.app"
           codesign --verify --deep --strict "$app"
           contents="$app/Contents"
