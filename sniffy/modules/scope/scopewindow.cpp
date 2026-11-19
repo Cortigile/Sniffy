@@ -244,6 +244,10 @@ void ScopeWindow::paintTraces(const QVector<QVector<QPointF>> &dataSeries, const
     labelInfoPanel->hideChannelLabels();
 
     if (xyMode && numChannels >= 2) {
+        if (displayedCapture.rangeMin < displayedCapture.rangeMax) {
+            panelCursors->cursorVerADial->updateRange(displayedCapture.rangeMin / 1000.0, displayedCapture.rangeMax / 1000.0);
+            panelCursors->cursorVerBDial->updateRange(displayedCapture.rangeMin / 1000.0, displayedCapture.rangeMax / 1000.0);
+        }
         if (xyChannelX < dataSeries.size() && xyChannelY < dataSeries.size() &&
             !dataSeries[xyChannelX].isEmpty() && !dataSeries[xyChannelY].isEmpty()) {
 
@@ -299,7 +303,9 @@ void ScopeWindow::paintTraces(const QVector<QVector<QPointF>> &dataSeries, const
         else                                       chart-> setHorizontalMarker(i,zeroMarkerPosition,MarkerType::TICK);
 
         const int level = historyBrowsing ? displayedCapture.triggerLevel : config->triggerLevel;
-        float triggerMarkerPosition = (config->channelOffset[i]+(qreal(level)/65535*(displayedCapture.rangeMax-displayedCapture.rangeMin)/1000))/config->channelScale[i];
+        const qreal triggerVoltage = (displayedCapture.rangeMin +
+            qreal(level) / 65535 * (displayedCapture.rangeMax - displayedCapture.rangeMin)) / 1000;
+        const qreal triggerMarkerPosition = (offset + triggerVoltage) * invScale;
         const int markerChannel = historyBrowsing ? triggerChannelIndex : panelSet->buttonsTriggerChannel->getSelectedIndex();
         if(markerChannel==i) {
             chart-> setHorizontalMarker(i,triggerMarkerPosition,MarkerType::TRIGGER);
@@ -424,7 +430,8 @@ void ScopeWindow::pretriggerCallback(float value){
 }
 
 void ScopeWindow::triggerValueCallback(float value){
-    emit triggerValueChanged(value/3.3*100);
+    const qreal spanMv = liveVoltageRange.maximumMv - liveVoltageRange.minimumMv;
+    emit triggerValueChanged(qBound(0.0, (qreal(value) * 1000 - liveVoltageRange.minimumMv) / spanMv * 100, 100.0));
     paintTraces(ChartData,ChartMathData);
 }
 
@@ -820,6 +827,28 @@ void ScopeWindow::triggerCaptured(){
 void ScopeWindow::setRealSamplingRateAndLlength(int smpl, int len){
     labelInfoPanel->setSamplingRateLabelText(LabelFormator::formatOutout(smpl,"SPS") + "  ("+LabelFormator::formatOutout(len,"")+")");
     panelAdvanced->samplingFrequencyReal->setValue(LabelFormator::formatOutout(smpl,"SPS",4));
+}
+
+std::optional<ScopeVoltageRange> ScopeWindow::voltageRange() const
+{
+    return panelAdvanced->voltageRange();
+}
+
+void ScopeWindow::setLiveVoltageRange(ScopeVoltageRange range)
+{
+    if (range.minimumMv == liveVoltageRange.minimumMv && range.maximumMv == liveVoltageRange.maximumMv)
+        return;
+    liveVoltageRange = range;
+    const qreal minimum = range.minimumMv / 1000.0;
+    const qreal maximum = range.maximumMv / 1000.0;
+    panelSet->dialTriggerValue->updateRange(minimum, maximum, true);
+    panelSet->dialTriggerValue->setRealValue(minimum + (maximum - minimum) * config->triggerLevelPercent / 100, true);
+
+    const float span = (range.maximumMv - range.minimumMv) / 1000.0;
+    for (float &offset : config->channelOffset)
+        offset = qBound(-span, offset, 2 * span);
+    panelSet->dialVerticalShift->updateRange(-span, 2 * span, true);
+    panelSet->dialVerticalShift->setRealValue(config->channelOffset[config->selectedChannelIndexVertical], true);
 }
 
 void ScopeWindow::setCaptureMetadata(const ScopeCapture &capture)

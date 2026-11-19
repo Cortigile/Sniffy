@@ -1,7 +1,9 @@
 #include "paneladvanced.h"
 #include "scopedefs.h"
+#include <cmath>
 
 PanelAdvanced::PanelAdvanced(QVBoxLayout *destination, QWidget *parent)
+    : QObject(parent)
 {
     destination->addWidget(new WidgetSeparator(parent,"Resolution"));
 
@@ -44,6 +46,63 @@ PanelAdvanced::PanelAdvanced(QVBoxLayout *destination, QWidget *parent)
     dataLengthInput->setObjectName(QStringLiteral("scopeDataLength"));
     destination->addWidget(dataLengthInput);
 
+    destination->addWidget(new WidgetSeparator(parent, "Voltage range"));
+    auto *vmin = new WidgetTextInput(parent, "Vmin (V)", "0");
+    vmin->setObjectName("scopeVoltageMin");
+    destination->addWidget(vmin);
+    auto *vmax = new WidgetTextInput(parent, "Vmax (V)", "3.3");
+    vmax->setObjectName("scopeVoltageMax");
+    destination->addWidget(vmax);
+
+    // Leave the object name empty so restoring a layout cannot activate the override.
+    auto *rangeMode = new WidgetSwitch(parent, "Firmware", "Custom");
+    rangeMode->setAccessibleName("Voltage range");
+    rangeMode->setColor(Graphics::palette().controls);
+    destination->addWidget(rangeMode);
+
+    auto *rangeError = new WidgetLabel(parent);
+    rangeError->setObjectName("scopeVoltageRangeError");
+    rangeError->setWordWrap(true);
+    rangeError->hide();
+    destination->addWidget(rangeError);
+    const auto applyRange = [this, vmin, vmax, rangeMode, rangeError]() {
+        const auto reject = [this, rangeMode, rangeError](const QString &message) {
+            if (!customVoltageRange)
+                rangeMode->setLeft(true);
+            rangeError->setValue(message);
+            rangeError->show();
+        };
+        bool minOk = false, maxOk = false;
+        const qreal minVolts = NumberParser::parse(vmin->getText().trimmed(), minOk);
+        const qreal maxVolts = NumberParser::parse(vmax->getText().trimmed(), maxOk);
+        if (!minOk || !maxOk || !std::isfinite(minVolts) || !std::isfinite(maxVolts) ||
+            qAbs(minVolts) > 1000 || qAbs(maxVolts) > 1000) {
+            reject("Enter voltages from -1000 to 1000 V. Range unchanged.");
+            return;
+        }
+        const ScopeVoltageRange range{qRound(minVolts * 1000), qRound(maxVolts * 1000)};
+        if (range.minimumMv >= range.maximumMv) {
+            reject("Vmin must be less than Vmax at 1 mV resolution. Range unchanged.");
+            return;
+        }
+        customVoltageRange = range;
+        rangeError->hide();
+    };
+    connect(rangeMode, &WidgetSwitch::clicked, this, [this, rangeError, applyRange](int mode) {
+        if (mode == 0) {
+            customVoltageRange.reset();
+            rangeError->hide();
+        } else {
+            applyRange();
+        }
+    });
+    const auto updateCustomRange = [this, applyRange]() {
+        if (customVoltageRange)
+            applyRange();
+    };
+    connect(vmin, &WidgetTextInput::textChanged, this, updateCustomRange);
+    connect(vmax, &WidgetTextInput::textChanged, this, updateCustomRange);
+
     destination->addWidget(new WidgetSeparator(parent,"Acquisition history"));
     historyPosition = new WidgetLabel(parent, "Capture", "Live (0/128)");
     destination->addWidget(historyPosition);
@@ -66,6 +125,7 @@ PanelAdvanced::PanelAdvanced(QVBoxLayout *destination, QWidget *parent)
     averagingMode = new WidgetSwitch(parent, "Off", "On", "Averaging");
     // Session-only: restoring widget geometry must not silently enable averaging.
     averagingMode->setObjectName(QString());
+    averagingMode->setAccessibleName("Averaging");
     destination->addWidget(averagingMode);
     averageWindowLabel = new WidgetLabel(parent, "Window", "16 captures");
     destination->addWidget(averageWindowLabel);

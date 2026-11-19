@@ -11,6 +11,7 @@ ModuleDockWidget::ModuleDockWidget(QWidget *parent, QString title) : QDockWidget
 
     // ***************** create title bar and window contorl icons *************
     QWidget *titleBar = new QWidget();
+    titleBar->setContextMenuPolicy(Qt::PreventContextMenu);
 
     QHBoxLayout* titleBarLayout = new QHBoxLayout();
     titleBarLayout->setContentsMargins(5,0,5,0);

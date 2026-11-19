@@ -8,15 +8,21 @@
 #include <utility>
 
 std::optional<ScopeCapture> ScopeCapture::decode(const QByteArray &data, float pretrigger,
-                                                QString &error)
+                                                QString &error,
+                                                std::optional<ScopeVoltageRange> voltageRange)
 {
     ScopeCapture capture;
     if (!std::isfinite(pretrigger) || pretrigger < 0 || pretrigger > 100) {
         error = QStringLiteral("Invalid OSC_ pretrigger percentage");
         return std::nullopt;
     }
+    if (voltageRange && voltageRange->minimumMv >= voltageRange->maximumMv) {
+        error = QStringLiteral("Invalid custom OSC_ voltage range");
+        return std::nullopt;
+    }
     QDataStream stream(data);
     int expectedChannels = 1;
+    qint16 firmwareLow = 0, firmwareHigh = 0;
     for (int channel = 1; channel <= expectedChannels; ++channel) {
         quint32 header = 0;
         qint32 rate = 0, length = 0;
@@ -38,16 +44,19 @@ std::optional<ScopeCapture> ScopeCapture::decode(const QByteArray &data, float p
         if (channel == 1) {
             capture.samplingRate = rate;
             capture.resolution = resolution;
-            capture.rangeMin = low;
-            capture.rangeMax = high;
+            firmwareLow = low;
+            firmwareHigh = high;
+            capture.rangeMin = voltageRange ? voltageRange->minimumMv : low;
+            capture.rangeMax = voltageRange ? voltageRange->maximumMv : high;
         } else if (rate != capture.samplingRate || resolution != capture.resolution ||
-                   low != capture.rangeMin || high != capture.rangeMax ||
+                   low != firmwareLow || high != firmwareHigh ||
                    length / bytesPerSample != capture.channels.first().size()) {
             error = QStringLiteral("Inconsistent OSC_ channel geometry");
             return std::nullopt;
         }
         const int samples = length / bytesPerSample;
         const qreal minX = -qreal(samples) / rate * pretrigger / 100.0;
+        const qreal spanMv = qreal(capture.rangeMax) - capture.rangeMin;
         QVector<QPointF> points;
         points.reserve(samples);
         for (int sample = 0; sample < samples; ++sample) {
@@ -56,7 +65,7 @@ std::optional<ScopeCapture> ScopeCapture::decode(const QByteArray &data, float p
             if (bytesPerSample == 2)
                 stream >> hi;
             const quint16 value = lo + (quint16(hi) << 8);
-            const qreal voltage = (value * qreal(high - low) / ((1u << resolution) - 1) + low) / 1000;
+            const qreal voltage = (value * spanMv / ((1u << resolution) - 1) + capture.rangeMin) / 1000;
             points.append(QPointF(minX + qreal(sample) / rate, voltage));
         }
         capture.channels.append(points);

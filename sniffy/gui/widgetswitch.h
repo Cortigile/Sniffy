@@ -40,7 +40,7 @@ protected:
 signals:
     void clicked(int index, int optionalEmitParam = 0);
 
-private slots:
+public slots:
     void setRight(bool silent = false);
     void setLeft(bool silent = false);
 };

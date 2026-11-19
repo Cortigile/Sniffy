@@ -195,6 +195,7 @@ The LOCK state typically applies to shared resources, such as timers, ADCs, or s
 ### Module windows
 
 Each module opens in a new dockable window. You can adjust the layout inside the main window, or undock individual modules as separate windows. Docking and undocking work identically to standard desktop applications in Windows, including control via the top right part of the window header.
+Right-clicking a module title bar does not open a menu. Open modules from the left panel.
 
 ![Layout with multiple docked module windows inside the main window](assets/images/dock_windows.png)
 
@@ -522,6 +523,10 @@ The Meas tab adds measurements over data. At least these variables are available
 - Phase,
 - Clear all.
 
+Peak-to-peak is the difference between the highest and lowest samples in the
+capture, even if the entire waveform is below zero. Frequency, period, and duty
+show **N/A** if no complete cycle is detected in the capture.
+
 ### 10.3 Cursors tab
 
 Allows working with cursors in the time and amplitude domains. The following are available:
@@ -561,6 +566,18 @@ In the Advanced section, you can configure:
 - custom data length,
 - working mode including XY display,
 - selection of X and Y axes in XY mode.
+
+#### Custom voltage range
+
+Under **Voltage range**, enter **Vmin** and **Vmax** in volts (in 1 mV increments)
+and select **Custom**. In Custom mode, confirm edits by pressing Enter or leaving the field.
+Starting with the next capture, the lowest ADC code maps to Vmin
+and the highest to Vmax on every channel. The plot, measurements, math, FFT, and cursors
+use the resulting voltages. Captures already in history keep their original range.
+Select **Firmware** to go back to the range reported by the board. The vertical **Shift**
+in the Set tab runs from -1 to +2 times the voltage span (`Vmax - Vmin`). If the span shrinks,
+offsets outside those limits are clamped. Activation of the custom range is not saved and
+does not change the physical ADC range or the permitted input voltage.
 
 #### Acquisition history and signal averaging
 

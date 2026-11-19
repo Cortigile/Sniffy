@@ -409,7 +409,7 @@ void MainWindow::showBottomLeftPopup(const QString &text)
 void MainWindow::repositionToasts()
 {
     const int margin = 20;
-    const int lift = 85;
+    const int lift = 120;
     int currentY = this->height() - margin - lift;
     const int spacing = 10;
 

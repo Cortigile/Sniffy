@@ -1719,8 +1719,10 @@ void AgentBridge::registerHandlers()
         PanelSettings *ps = nullptr;
         auto err = findScopePS(p, ps);
         if (!err.isEmpty()) return err;
-        float pct = static_cast<float>(p.value(QStringLiteral("percent")).toDouble(50.0));
-        ps->dialTriggerValue->setRealValue(pct, false);
+        const double pct = qBound(0.0, p.value(QStringLiteral("percent")).toDouble(50.0), 100.0);
+        auto *level = ps->dialTriggerValue;
+        const double minimum = level->getRangeMin();
+        level->setRealValue(minimum + (level->getRangeMax() - minimum) * pct / 100, false);
         return QJsonObject{{QStringLiteral("ok"), true}};
     };
 

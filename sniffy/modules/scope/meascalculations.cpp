@@ -58,8 +58,12 @@ void MeasCalculations::run()
             case MeasurementType::LOW:
                 calculateTime(data[channelIndex],channelIndex,samplingFreq);
                 m->setLabel("Duty Low");
-                m->setValueString(LabelFormator::formatOutout(100-High[channelIndex]*100,"%"));
-                m->setValue(100-High[channelIndex]*100);
+                {
+                    const qreal duty = qIsFinite(High[channelIndex])
+                        ? 100 - High[channelIndex] * 100 : High[channelIndex];
+                    m->setValueString(LabelFormator::formatOutout(duty, "%"));
+                    m->setValue(duty);
+                }
                 break;
             case MeasurementType::HIGH:
                 calculateTime(data[channelIndex],channelIndex,samplingFreq);
@@ -172,8 +176,8 @@ void MeasCalculations::run()
             case MeasurementType::PERIOD:
                 calculateTime(data[channelIndex],channelIndex,samplingFreq);
                 m->setLabel("Period");
-                m->setValueString(LabelFormator::formatOutout(1.0/Freq[channelIndex],"s"));
-                m->setValue(1.0/Freq[channelIndex]);
+                m->setValueString(LabelFormator::formatOutout(Period[channelIndex],"s"));
+                m->setValue(Period[channelIndex]);
                 break;
             case MeasurementType::FREQUENCY:
                 calculateTime(data[channelIndex],channelIndex,samplingFreq);
@@ -196,11 +200,13 @@ void MeasCalculations::run()
     }
 }
 
-void MeasCalculations::calculateVolt(QVector<QPointF> data, qint32 ch){
+void MeasCalculations::calculateVolt(const QVector<QPointF> &data, qint32 ch){
+    if (isVoltCalculated[ch])
+        return;
     RMS[ch] = 0;
     Mean[ch] = 0;
-    Max[ch] = std::numeric_limits<qreal>::min();
-    Min[ch] = std::numeric_limits<qreal>::max();;
+    Max[ch] = std::numeric_limits<qreal>::lowest();
+    Min[ch] = std::numeric_limits<qreal>::max();
     for (const QPointF &pt : data) {
 
         RMS[ch] += qPow(pt.y(),2);
@@ -216,10 +222,8 @@ void MeasCalculations::calculateVolt(QVector<QPointF> data, qint32 ch){
 }
 
 
-void MeasCalculations::calculateTime(QVector<QPointF> data, qint32 ch, qint32 sampling){
-    if(!isVoltCalculated[ch]){
-        calculateVolt(data,ch);
-    }
+void MeasCalculations::calculateTime(const QVector<QPointF> &data, qint32 ch, qint32 sampling){
+    calculateVolt(data,ch);
     if(!isTimeCalculated[ch]){
         double middleValue = ((double)(Max[ch]) + Min[ch]) / 2;
 
@@ -305,7 +309,7 @@ void MeasCalculations::calculateTime(QVector<QPointF> data, qint32 ch, qint32 sa
         }else{
             Freq[ch] = std::numeric_limits<qreal>::infinity();
             Period[ch] = std::numeric_limits<qreal>::infinity();
-            High[ch] = qRound((double)totalUp*1000 / (totalUp + totalDown))/1000.0;
+            High[ch] = std::numeric_limits<qreal>::infinity();
         }
         ZeroCrossingCount[ch] = zerocrossindex;
         isTimeCalculated[ch] = true;

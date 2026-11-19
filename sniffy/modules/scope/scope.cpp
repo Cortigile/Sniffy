@@ -75,7 +75,7 @@ void Scope::parseData(QByteArray data){
         if (!samplingActive || browsingHistory)
             return;
         QString error;
-        auto capture = ScopeCapture::decode(data, config->pretriggerPercent, error);
+        auto capture = ScopeCapture::decode(data, config->pretriggerPercent, error, scpWindow->voltageRange());
         if (!capture) {
             qWarning() << "[Scope][parseData]" << error;
             return;
@@ -85,6 +85,7 @@ void Scope::parseData(QByteArray data){
         config->numberOfChannelsReceived = capture->channels.size();
         config->rangeMin = capture->rangeMin;
         config->rangeMax = capture->rangeMax;
+        scpWindow->setLiveVoltageRange({capture->rangeMin, capture->rangeMax});
         config->timeMin = capture->channels.first().first().x();
         config->timeMax = capture->channels.first().last().x();
         capture->timeBase = config->timeBase;
