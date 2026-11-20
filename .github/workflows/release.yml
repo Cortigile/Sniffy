@@ -257,6 +257,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  build_macos:
+    name: Build macOS installer
+    needs: release_plan
+    uses: ./.github/workflows/macos-build.yml
+    with:
+      publish: true
+      release_name: Sniffy Desktop ${{ needs.release_plan.outputs.desktop_version }}
+
   manual_pdf:
     name: Build ${{ matrix.manual.language }} release manual PDF
     runs-on: ubuntu-latest
@@ -322,6 +330,7 @@ jobs:
     needs:
       - release_plan
       - build
+      - build_macos
       - manual_pdf
 
     steps:
@@ -416,6 +425,7 @@ jobs:
       - release_plan
       - mcp_package
       - build
+      - build_macos
     if: needs.release_plan.outputs.changed == 'true'
 
     steps:

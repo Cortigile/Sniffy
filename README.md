@@ -20,7 +20,7 @@ Jump to official project website [sniffylab.com](https://sniffylab.com) for regi
 - **Real-time Visualization**: High-performance charting for signal analysis.
 - **Module Support**: Configurable modules for Oscilloscope, Signal Generator, PWM, and more.
 - **Frequency Analysis**: Two-input gain/phase sweeps with linear/logarithmic frequency and Vpp spacing, Bode plots, and CSV export on compatible hardware/firmware.
-- **Cross-Platform**: Available for Windows and Linux.
+- **Cross-Platform**: Builds for Windows, Linux, and macOS (Apple Silicon).
 - **Hardware Integration**: Full operational firmware for STM32 Nucleo boards available via commercial licensing (runs in restricted Demo mode by default).
 
 ## Installation
@@ -33,6 +33,10 @@ Jump to official project website [sniffylab.com](https://sniffylab.com) for regi
 	*   The application requires ST-Link USB drivers which should be installed automaticaly.
 	*   If you have used your Nucleo board on this computer before (with STM32CubeIDE, Keil, etc.), the drivers are already installed.
 	*   If the device is not detected, download and install the **STSW-LINK009** driver from [ST.com](https://www.st.com/en/development-tools/stsw-link009.html).
+
+### macOS (Apple Silicon)
+
+Download the `.dmg` from [Releases](https://github.com/Cortigile/sniffy/releases), open it, and drag `sniffy.app` to Applications. The DMG includes Qt, libusb, and the ST-Link chip definitions. License files are in the `licenses` folder on the disk image; mounting it does not require accepting a license dialog. The current build is arm64 only and is not Developer ID signed or notarized, so macOS Gatekeeper may block the first launch.
 
 ### Linux (Ubuntu/Debian)
 
@@ -113,6 +117,7 @@ The desktop application drives the STM32 Nucleo board over a serial protocol, wh
 - CMake 3.21+
 - Ninja (optional, but recommended)
 - **Linux**: `libusb-1.0-0-dev`, `libstlink-dev`, `build-essential`
+- **macOS**: Xcode Command Line Tools, Qt 6.7 or later (with Qt Charts and Qt Serial Port), and `brew install libusb pkg-config stlink ninja`. Use the pinned ST-Link revision from the [macOS workflow](.github/workflows/macos-build.yml) to reproduce the release build.
 
 ### Build Steps
 
@@ -122,6 +127,8 @@ cd sniffy
 cmake -S sniffy -B build
 cmake --build build
 ```
+
+On macOS, point `CMAKE_PREFIX_PATH` at your Qt installation if CMake does not find it. For a Release build, run `(cd build && cpack -C Release)` to create a self-contained DMG. In GitHub Actions, **Build macOS installer** can also be run manually to download a test DMG without publishing a release.
 
 For updater regression tests, see [tests/README.md](tests/README.md).
 

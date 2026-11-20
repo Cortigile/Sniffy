@@ -184,7 +184,7 @@ QVector<std::complex<float>> FFTengine::fft(QVector<std::complex<float>> x) {
     QVector<std::complex<float>> X;
     X.resize(N);
     for (int k = 0; k < N / 2; k++) {
-        std::complex<float> Wi = std::pow(Wn, k);
+        const auto Wi = std::complex<float>(std::pow(Wn, k));
         X[k] = Xe[k] + Wi * Xo[k];
         X[k + N / 2] = Xe[k] - Wi * Xo[k];
     }

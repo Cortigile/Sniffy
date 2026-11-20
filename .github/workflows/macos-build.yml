@@ -1,0 +1,109 @@
+name: Build macOS installer
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      publish:
+        type: boolean
+        default: false
+      release_name:
+        type: string
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.8.0'
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: 'qtcharts qtserialport'
+
+      - name: Install dependencies
+        run: brew install libusb ninja pkg-config
+
+      - name: Build pinned ST-Link
+        env:
+          STLINK_GIT_REF: 40948aa3de78778f51af02d795327ac20fa385d3
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/stlink"
+          git -C "$RUNNER_TEMP/stlink" fetch --depth 1 https://github.com/stlink-org/stlink.git "$STLINK_GIT_REF"
+          git -C "$RUNNER_TEMP/stlink" checkout --detach FETCH_HEAD
+          # This revision adds -Werror itself; the Release flags occur later in the command line.
+          cmake -S "$RUNNER_TEMP/stlink" -B "$RUNNER_TEMP/stlink-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix libusb)" \
+            '-DCMAKE_C_FLAGS=-DMINIMAL_API_VERSION=0x01000108' \
+            '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -Wno-error'
+          cmake --build "$RUNNER_TEMP/stlink-build" --target stlink-static
+          echo "SNIFFY_STLINK_LIBRARY=$RUNNER_TEMP/stlink-build/lib/libstlink.a" >> "$GITHUB_ENV"
+
+      - name: Build and package Sniffy
+        run: |
+          cmake -S sniffy -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build build --config Release
+          cd build
+          cpack -C Release -V
+
+      - name: Verify packaged app
+        run: |
+          set -euo pipefail
+          dmg=(build/*.dmg)
+          mount_point="$(mktemp -d)"
+          hdiutil attach "${dmg[0]}" -mountpoint "$mount_point" -readonly -nobrowse < /dev/null
+          trap 'hdiutil detach "$mount_point"; rmdir "$mount_point"' EXIT
+
+          test -s "$mount_point/licenses/LICENSE.txt"
+          app="$mount_point/sniffy.app"
+          codesign --verify --deep --strict "$app"
+          contents="$app/Contents"
+          plutil -lint "$contents/Info.plist"
+          executable="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$contents/Info.plist")"
+          test "$(lipo -archs "$contents/MacOS/$executable")" = arm64
+          test -f "$contents/PlugIns/platforms/libqcocoa.dylib"
+          test -d "$contents/Frameworks/QtCore.framework"
+          ls "$contents/Resources/chips/"*.chip >/dev/null
+          ls "$contents/Frameworks/"libusb-1.0*.dylib >/dev/null
+          dependencies="$(otool -L "$contents/MacOS/$executable" | tail -n +2)"
+          printf '%s\n' "$dependencies"
+          if grep -Eq '^[[:space:]]+/(opt/|usr/local/|Users/)' <<< "$dependencies"; then
+            echo "::error::Packaged executable still references libraries on the build host"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sniffy-macos-arm64
+          path: build/*.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: inputs.publish && startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sniffy-macos-arm64
+          path: dmg
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ inputs.release_name }}
+          files: dmg/*.dmg
+          fail_on_unmatched_files: true
